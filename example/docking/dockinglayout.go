@@ -16,7 +16,7 @@ import (
 	"github.com/guigui-gui/guigui/basicwidget"
 )
 
-// DropEdge identifies a drop zone within a target panel.
+// DropEdge identifies a drop zone within a target group.
 type DropEdge int
 
 const (
@@ -28,10 +28,10 @@ const (
 	dropEdgeCenter
 )
 
-// DockNode is a node in the docking tree. Exactly one of panel or split is
+// DockNode is a node in the docking tree. Exactly one of group or split is
 // non-nil.
 type DockNode struct {
-	panel *DockPanel
+	group *DockGroup
 	split *DockSplit
 }
 
@@ -54,12 +54,12 @@ type dockDivider struct {
 	available int
 }
 
-type dockPanelBounds struct {
+type dockGroupBounds struct {
 	node   *DockNode
 	bounds image.Rectangle
 }
 
-// dockOverlay draws the drop-preview on top of the panels during a drag.
+// dockOverlay draws the drop-preview on top of the groups during a drag.
 // It is passthrough so it does not interfere with hit testing.
 type dockOverlay struct {
 	guigui.DefaultWidget
@@ -77,9 +77,9 @@ func (o *dockOverlay) Draw(context *guigui.Context, widgetBounds *guigui.WidgetB
 	vector.DrawFilledRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), highlight, false)
 }
 
-// DockingLayout arranges dockable panels in a nestable split tree whose
-// dividers can be dragged to resize the panels and whose title bars can be
-// dragged to re-dock the panels.
+// DockingLayout arranges dockable panels in a nestable tree of groups (tabs)
+// and splits. Dividers resize; dragging a tab re-docks it, either as another
+// tab (center) or as a new group split onto an edge.
 type DockingLayout struct {
 	guigui.DefaultWidget
 
@@ -87,7 +87,7 @@ type DockingLayout struct {
 	overlay dockOverlay
 
 	dividers    []dockDivider
-	panelBounds []dockPanelBounds
+	groupBounds []dockGroupBounds
 
 	// Divider-resize drag state.
 	dragging       *DockSplit
@@ -96,10 +96,12 @@ type DockingLayout struct {
 	dragAvailable  int
 
 	// Panel-move drag state.
-	dragNode *DockNode
-	dropNode *DockNode
-	dropEdge DropEdge
-	dropRect image.Rectangle
+	dragPanel  *DockPanel
+	dragGroup  *DockGroup
+	sourceNode *DockNode
+	dropNode   *DockNode
+	dropEdge   DropEdge
+	dropRect   image.Rectangle
 }
 
 // SetRoot sets the root of the docking tree.
@@ -118,11 +120,12 @@ func (d *DockingLayout) Build(context *guigui.Context, adder *guigui.ChildAdder)
 }
 
 func (d *DockingLayout) addNode(adder *guigui.ChildAdder, node *DockNode) {
-	if node.panel != nil {
-		adder.AddWidget(node.panel)
-		node.panel.OnDragStart(func(context *guigui.Context, origin image.Point) {
-			d.beginDrag(node, origin)
-		})
+	if node.group != nil {
+		adder.AddWidget(node.group)
+		group := node.group
+		group.onDragStart = func(panel *DockPanel, cursor image.Point) {
+			d.beginDrag(panel, group, cursor)
+		}
 		return
 	}
 	if node.split != nil {
@@ -133,7 +136,7 @@ func (d *DockingLayout) addNode(adder *guigui.ChildAdder, node *DockNode) {
 
 func (d *DockingLayout) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	d.dividers = slices.Delete(d.dividers, 0, len(d.dividers))
-	d.panelBounds = slices.Delete(d.panelBounds, 0, len(d.panelBounds))
+	d.groupBounds = slices.Delete(d.groupBounds, 0, len(d.groupBounds))
 	if d.root != nil {
 		d.layoutNode(context, d.root, widgetBounds.Bounds(), layouter)
 	}
@@ -144,24 +147,8 @@ func (d *DockingLayout) dividerThickness(context *guigui.Context) int {
 	return max(6, basicwidget.UnitSize(context)/4)
 }
 
-// collapsedExtent reports the fixed extent a collapsed panel takes along the
-// split axis, and whether node is a collapsed panel.
-func collapsedExtent(context *guigui.Context, node *DockNode) (int, bool) {
-	if node.panel != nil && !node.panel.Pinned {
-		return basicwidget.UnitSize(context), true
-	}
-	return 0, false
-}
-
-// splitExtents computes the extents of the two children along the split axis,
-// honoring collapsed panels before falling back to the ratio.
+// splitExtents computes the extents of the two children along the split axis.
 func (d *DockingLayout) splitExtents(context *guigui.Context, split *DockSplit, available int) (int, int) {
-	if ce, ok := collapsedExtent(context, split.first); ok {
-		return ce, available - ce
-	}
-	if ce, ok := collapsedExtent(context, split.second); ok {
-		return available - ce, ce
-	}
 	minExtent := basicwidget.UnitSize(context)
 	first := int(float64(available) * split.ratio)
 	second := available - first
@@ -175,9 +162,9 @@ func (d *DockingLayout) splitExtents(context *guigui.Context, split *DockSplit, 
 }
 
 func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, bounds image.Rectangle, layouter *guigui.ChildLayouter) {
-	if node.panel != nil {
-		layouter.LayoutWidget(node.panel, bounds)
-		d.panelBounds = append(d.panelBounds, dockPanelBounds{node: node, bounds: bounds})
+	if node.group != nil {
+		layouter.LayoutWidget(node.group, bounds)
+		d.groupBounds = append(d.groupBounds, dockGroupBounds{node: node, bounds: bounds})
 		return
 	}
 	split := node.split
@@ -234,7 +221,7 @@ func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBound
 	cursor := image.Pt(ebiten.CursorPosition())
 
 	// A panel drag is in flight.
-	if d.dragNode != nil {
+	if d.dragPanel != nil {
 		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 			d.updateDropTarget(cursor)
 			guigui.RequestRedraw(d)
@@ -269,9 +256,11 @@ func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBound
 	return guigui.HandleInputResult{}
 }
 
-// beginDrag starts moving node, called from a panel's title-bar press.
-func (d *DockingLayout) beginDrag(node *DockNode, origin image.Point) {
-	d.dragNode = node
+// beginDrag starts moving panel out of group, called from a tab press.
+func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor image.Point) {
+	d.dragPanel = panel
+	d.dragGroup = group
+	d.sourceNode = findGroupNode(d.root, group)
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
@@ -282,99 +271,138 @@ func (d *DockingLayout) updateDropTarget(cursor image.Point) {
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
-	for i := range d.panelBounds {
-		pb := &d.panelBounds[i]
-		if pb.node == d.dragNode || !cursor.In(pb.bounds) {
+	for i := range d.groupBounds {
+		gb := &d.groupBounds[i]
+		if gb.node == d.sourceNode || !cursor.In(gb.bounds) {
 			continue
 		}
-		edge := dropEdgeAt(cursor, pb.bounds)
-		// Center drops (tabs) are not implemented yet.
-		if edge == dropEdgeCenter || edge == dropEdgeNone {
+		edge := dropEdgeAt(cursor, gb.bounds)
+		if edge == dropEdgeNone {
 			continue
 		}
-		d.dropNode = pb.node
+		d.dropNode = gb.node
 		d.dropEdge = edge
-		d.dropRect = dropRectFor(pb.bounds, edge)
+		d.dropRect = dropRectFor(gb.bounds, edge)
 		return
 	}
 }
 
 // finishDrag applies the pending drop, if any, and clears the drag state.
 func (d *DockingLayout) finishDrag() {
-	if d.dragNode != nil && d.dropNode != nil && d.dropEdge != dropEdgeNone && d.dropNode != d.dragNode {
-		d.movePanel(d.dragNode, d.dropNode, d.dropEdge)
+	if d.dragPanel != nil && d.dropNode != nil && d.dropEdge != dropEdgeNone {
+		d.movePanel(d.dragPanel, d.dragGroup, d.dropNode, d.dropEdge)
 	}
-	d.dragNode = nil
+	d.dragPanel = nil
+	d.dragGroup = nil
+	d.sourceNode = nil
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
 	guigui.RequestRedraw(d)
 }
 
-// movePanel detaches dragged from its current position and docks it next to
-// target on the given edge.
-func (d *DockingLayout) movePanel(dragged, target *DockNode, edge DropEdge) {
-	d.root = detachLeaf(d.root, dragged)
-	d.root = attachLeaf(d.root, target, dragged, edge)
+// movePanel removes panel from its source group and re-docks it: into target's
+// group on a center drop, or as a new group split next to target on an edge.
+func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, targetNode *DockNode, edge DropEdge) {
+	if removePanelFromGroup(source, panel) {
+		// The source group is now empty; remove it from the tree.
+		d.root = removeNode(d.root, findGroupNode(d.root, source))
+	}
+
+	if edge == dropEdgeCenter {
+		target := targetNode.group
+		target.panels = append(target.panels, panel)
+		target.selected = len(target.panels) - 1
+		return
+	}
+
+	newGroup := &DockGroup{
+		panels:   []*DockPanel{panel},
+		selected: 0,
+	}
+	d.root = attachNode(d.root, targetNode, &DockNode{group: newGroup}, edge)
 }
 
-// detachLeaf removes leaf from the tree, collapsing its parent split so the
-// sibling takes over. Returns the new root.
-func detachLeaf(root, leaf *DockNode) *DockNode {
-	if root == leaf {
+// removePanelFromGroup removes panel from group, fixing the selection. It
+// reports whether the group is now empty.
+func removePanelFromGroup(group *DockGroup, panel *DockPanel) bool {
+	for i, p := range group.panels {
+		if p == panel {
+			group.panels = append(group.panels[:i], group.panels[i+1:]...)
+			if group.selected >= len(group.panels) {
+				group.selected = len(group.panels) - 1
+			}
+			return len(group.panels) == 0
+		}
+	}
+	return false
+}
+
+// findGroupNode returns the node whose group is group, or nil.
+func findGroupNode(node *DockNode, group *DockGroup) *DockNode {
+	if node == nil {
 		return nil
 	}
-	return removeLeaf(root, leaf)
+	if node.group == group {
+		return node
+	}
+	if node.split != nil {
+		if n := findGroupNode(node.split.first, group); n != nil {
+			return n
+		}
+		if n := findGroupNode(node.split.second, group); n != nil {
+			return n
+		}
+	}
+	return nil
 }
 
-// removeLeaf returns node's subtree with leaf removed, collapsing the split
-// that directly contained it. The sibling keeps its own node identity (the
-// pointer survives rather than being copied into the split slot), which
-// matters when that sibling is also the target the panel is re-docked onto.
-func removeLeaf(node, leaf *DockNode) *DockNode {
-	if node == leaf {
+// removeNode returns node's subtree with the target node removed, collapsing
+// the split that directly contained it so the sibling keeps its own identity.
+func removeNode(node, target *DockNode) *DockNode {
+	if node == target {
 		return nil
 	}
 	if node.split == nil {
 		return node
 	}
-	if node.split.first == leaf {
+	if node.split.first == target {
 		return node.split.second
 	}
-	if node.split.second == leaf {
+	if node.split.second == target {
 		return node.split.first
 	}
-	node.split.first = removeLeaf(node.split.first, leaf)
-	node.split.second = removeLeaf(node.split.second, leaf)
+	node.split.first = removeNode(node.split.first, target)
+	node.split.second = removeNode(node.split.second, target)
 	return node
 }
 
-// attachLeaf replaces target with a new split holding target and dragged,
+// attachNode replaces target with a new split holding target and newNode,
 // ordered by edge. Returns the new root.
-func attachLeaf(root, target, dragged *DockNode, edge DropEdge) *DockNode {
-	direction, draggedFirst := splitForEdge(edge)
+func attachNode(root, target, newNode *DockNode, edge DropEdge) *DockNode {
+	direction, newNodeFirst := splitForEdge(edge)
 	newSplit := &DockNode{
 		split: &DockSplit{
 			direction: direction,
 			ratio:     0.5,
 		},
 	}
-	if draggedFirst {
-		newSplit.split.first = dragged
+	if newNodeFirst {
+		newSplit.split.first = newNode
 		newSplit.split.second = target
 	} else {
 		newSplit.split.first = target
-		newSplit.split.second = dragged
+		newSplit.split.second = newNode
 	}
 	if root == target {
 		return newSplit
 	}
-	replaceLeaf(root, target, newSplit)
+	replaceNode(root, target, newSplit)
 	return root
 }
 
 // splitForEdge returns the split direction for an edge drop and whether the
-// dragged panel should be the split's first child.
+// new node should be the split's first child.
 func splitForEdge(edge DropEdge) (guigui.LayoutDirection, bool) {
 	switch edge {
 	case dropEdgeLeft:
@@ -389,7 +417,7 @@ func splitForEdge(edge DropEdge) (guigui.LayoutDirection, bool) {
 	return guigui.LayoutDirectionHorizontal, false
 }
 
-func replaceLeaf(node, target, replacement *DockNode) {
+func replaceNode(node, target, replacement *DockNode) {
 	if node.split == nil {
 		return
 	}
@@ -401,11 +429,12 @@ func replaceLeaf(node, target, replacement *DockNode) {
 		node.split.second = replacement
 		return
 	}
-	replaceLeaf(node.split.first, target, replacement)
-	replaceLeaf(node.split.second, target, replacement)
+	replaceNode(node.split.first, target, replacement)
+	replaceNode(node.split.second, target, replacement)
 }
 
-// dropEdgeAt returns the drop zone the cursor falls in within bounds.
+// dropEdgeAt returns the drop zone the cursor falls in within bounds: the
+// outer thirds are the four edges, and the middle is the center (tab).
 func dropEdgeAt(cursor image.Point, b image.Rectangle) DropEdge {
 	edgeX := b.Dx() / 3
 	edgeY := b.Dy() / 3
@@ -435,6 +464,11 @@ func dropRectFor(b image.Rectangle, edge DropEdge) image.Rectangle {
 		return image.Rectangle{Min: b.Min, Max: image.Pt(b.Max.X, b.Min.Y+edgeY)}
 	case dropEdgeBottom:
 		return image.Rectangle{Min: image.Pt(b.Min.X, b.Max.Y-edgeY), Max: b.Max}
+	case dropEdgeCenter:
+		return image.Rectangle{
+			Min: image.Pt(b.Min.X+edgeX, b.Min.Y+edgeY),
+			Max: image.Pt(b.Max.X-edgeX, b.Max.Y-edgeY),
+		}
 	}
 	return image.Rectangle{}
 }
@@ -455,7 +489,7 @@ func (d *DockingLayout) updateRatio(cursor image.Point) {
 }
 
 func (d *DockingLayout) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
-	if d.dragNode != nil {
+	if d.dragPanel != nil {
 		return 0, false
 	}
 	if d.dragging != nil {
