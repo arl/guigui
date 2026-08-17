@@ -324,26 +324,29 @@ func detachLeaf(root, leaf *DockNode) *DockNode {
 	if root == leaf {
 		return nil
 	}
-	removeLeaf(root, leaf)
-	return root
+	return removeLeaf(root, leaf)
 }
 
-// removeLeaf replaces leaf with its sibling within node's subtree, collapsing
-// the split that directly contained it.
-func removeLeaf(node, leaf *DockNode) {
+// removeLeaf returns node's subtree with leaf removed, collapsing the split
+// that directly contained it. The sibling keeps its own node identity (the
+// pointer survives rather than being copied into the split slot), which
+// matters when that sibling is also the target the panel is re-docked onto.
+func removeLeaf(node, leaf *DockNode) *DockNode {
+	if node == leaf {
+		return nil
+	}
 	if node.split == nil {
-		return
+		return node
 	}
 	if node.split.first == leaf {
-		*node = *node.split.second
-		return
+		return node.split.second
 	}
 	if node.split.second == leaf {
-		*node = *node.split.first
-		return
+		return node.split.first
 	}
-	removeLeaf(node.split.first, leaf)
-	removeLeaf(node.split.second, leaf)
+	node.split.first = removeLeaf(node.split.first, leaf)
+	node.split.second = removeLeaf(node.split.second, leaf)
+	return node
 }
 
 // attachLeaf replaces target with a new split holding target and dragged,
