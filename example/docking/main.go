@@ -12,6 +12,16 @@ import (
 	"github.com/guigui-gui/guigui/basicwidget"
 )
 
+// newPanel builds a DockPanel for the given title and content.
+func newPanel(title string, content guigui.Widget) *DockPanel {
+	return &DockPanel{Title: title, Content: content}
+}
+
+// newGroupNode builds a leaf group node holding the given panels as tabs.
+func newGroupNode(panels ...*DockPanel) *DockNode {
+	return &DockNode{group: &DockGroup{panels: panels, selected: 0}}
+}
+
 // Root hosts the docking layout that the example showcases.
 type Root struct {
 	guigui.DefaultWidget
@@ -19,9 +29,10 @@ type Root struct {
 	background basicwidget.Background
 	dock       DockingLayout
 
-	editor  editorPanel
-	form    formPanel
-	console consolePanel
+	editor     editorPanel
+	form       formPanel
+	properties propertiesPanel
+	console    consolePanel
 }
 
 func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -188,6 +199,60 @@ func (f *formPanel) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	layouter.LayoutWidget(&f.panel, widgetBounds.Bounds())
 }
 
+// propertiesPanel holds a few settings, tabbed with the form to showcase
+// groups.
+type propertiesPanel struct {
+	guigui.DefaultWidget
+
+	panel basicwidget.Panel
+	form  basicwidget.Form
+
+	wordWrapText   basicwidget.Text
+	wordWrapToggle basicwidget.Toggle
+
+	lineNumbersText   basicwidget.Text
+	lineNumbersToggle basicwidget.Toggle
+
+	wordWrap    bool
+	lineNumbers bool
+	initialized bool
+}
+
+func (p *propertiesPanel) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	adder.AddWidget(&p.panel)
+
+	p.panel.SetContent(&p.form)
+	p.panel.SetContentConstraints(basicwidget.PanelContentConstraintsFixedWidth)
+
+	if !p.initialized {
+		p.wordWrap = true
+		p.lineNumbers = true
+		p.initialized = true
+	}
+
+	p.wordWrapText.SetValue("Word wrap")
+	p.wordWrapToggle.SetValue(p.wordWrap)
+	p.wordWrapToggle.OnValueChanged(func(context *guigui.Context, value bool) {
+		p.wordWrap = value
+	})
+
+	p.lineNumbersText.SetValue("Line numbers")
+	p.lineNumbersToggle.SetValue(p.lineNumbers)
+	p.lineNumbersToggle.OnValueChanged(func(context *guigui.Context, value bool) {
+		p.lineNumbers = value
+	})
+
+	p.form.SetItems([]basicwidget.FormItem{
+		{PrimaryWidget: &p.wordWrapText, SecondaryWidget: &p.wordWrapToggle},
+		{PrimaryWidget: &p.lineNumbersText, SecondaryWidget: &p.lineNumbersToggle},
+	})
+	return nil
+}
+
+func (p *propertiesPanel) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(&p.panel, widgetBounds.Bounds())
+}
+
 // consolePanel hosts a scratchpad that demonstrates a third docked panel.
 type consolePanel struct {
 	guigui.DefaultWidget
@@ -211,8 +276,8 @@ func (c *consolePanel) Layout(context *guigui.Context, widgetBounds *guigui.Widg
 func main() {
 	root := &Root{}
 
-	// Nest a horizontal split (form | editor) inside a vertical split with a
-	// console panel docked at the bottom.
+	// A vertical split: a tab group (Form | Properties) beside the editor on
+	// top, and the console docked at the bottom.
 	root.dock.SetRoot(&DockNode{
 		split: &DockSplit{
 			direction: guigui.LayoutDirectionVertical,
@@ -221,11 +286,14 @@ func main() {
 				split: &DockSplit{
 					direction: guigui.LayoutDirectionHorizontal,
 					ratio:     0.35,
-					first:     &DockNode{panel: &DockPanel{title: "Form", content: &root.form, Pinned: true}},
-					second:    &DockNode{panel: &DockPanel{title: "Editor", content: &root.editor, Pinned: true}},
+					first: newGroupNode(
+						newPanel("Form", &root.form),
+						newPanel("Properties", &root.properties),
+					),
+					second: newGroupNode(newPanel("Editor", &root.editor)),
 				},
 			},
-			second: &DockNode{panel: &DockPanel{title: "Console", content: &root.console, Pinned: true}},
+			second: newGroupNode(newPanel("Console", &root.console)),
 		},
 	})
 
