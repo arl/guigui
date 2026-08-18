@@ -52,30 +52,36 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 type paneViewPanel struct {
 	guigui.DefaultWidget
 
-	paneView *PaneView
-	editor   *editorPanel
-	console  *consolePanel
-	form     *formPanel
+	paneView PaneView
+
+	pane1 basicwidget.TextInput
+	pane2 basicwidget.TextInput
+	pane3 basicwidget.TextInput
 }
 
 func (p *paneViewPanel) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	p.paneView = &PaneView{}
+	adder.AddWidget(&p.paneView)
 
-	// Create some sample panes
-	pane1 := NewPane("Properties", p.editor)
-	pane2 := NewPane("Console", p.console)
-	pane3 := NewPane("Form", p.form)
+	p.pane1.SetMultiline(true)
+	p.pane1.SetWrapMode(basicwidget.WrapModeNormal)
+	p.pane1.SetPlaceholder("Pane 1 content…")
+	p.pane2.SetMultiline(true)
+	p.pane2.SetWrapMode(basicwidget.WrapModeNormal)
+	p.pane2.SetPlaceholder("Pane 2 content…")
+	p.pane3.SetMultiline(true)
+	p.pane3.SetWrapMode(basicwidget.WrapModeNormal)
+	p.pane3.SetPlaceholder("Pane 3 content…")
 
-	p.paneView.AddPane(pane1)
-	p.paneView.AddPane(pane2)
-	p.paneView.AddPane(pane3)
-
-	adder.AddWidget(p.paneView)
+	if len(p.paneView.panes) == 0 {
+		p.paneView.AddPane(NewPane("First", &p.pane1))
+		p.paneView.AddPane(NewPane("Second", &p.pane2))
+		p.paneView.AddPane(NewPane("Third", &p.pane3))
+	}
 	return nil
 }
 
 func (p *paneViewPanel) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
-	layouter.LayoutWidget(p.paneView, widgetBounds.Bounds())
+	layouter.LayoutWidget(&p.paneView, widgetBounds.Bounds())
 }
 
 // editorPanel hosts a multiline rich-text editor.
@@ -330,11 +336,6 @@ func main() {
 			),
 		},
 	})
-
-	// Initialize the pane view panel with references to the same widgets
-	root.paneview.editor = &root.editor
-	root.paneview.console = &root.console
-	root.paneview.form = &root.form
 
 	if err := guigui.Run(root, &guigui.RunOptions{
 		Title:      "Docking",
