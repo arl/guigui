@@ -6,10 +6,12 @@ package main
 import (
 	"image"
 	"image/color"
+	"math"
 	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 
 	"github.com/guigui-gui/guigui"
@@ -47,12 +49,15 @@ type DockGroup struct {
 	layoutItems []guigui.LinearLayoutItem
 
 	// tabBarUsed is the absolute X where the tabs end and the empty part of
-	// the tab bar begins. It is set during Layout.
+	// the tab bar begins. It is set during Layout (horizontal groups).
 	tabBarUsed int
+	// tabBarUsedY is the absolute Y where the tabs end and the empty part of
+	// the vertical strip begins. It is set during Layout (vertical groups).
+	tabBarUsedY int
 }
 
 // stripWidth is the width of a vertical tab strip.
-func stripWidth(u int) int { return u * 3 }
+func stripWidth(u int) int { return u * 2 }
 
 // pressTab selects panel and starts a drag of it.
 func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
@@ -117,9 +122,20 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 
 		g.layoutItems = slices.Delete(g.layoutItems, 0, len(g.layoutItems))
 		for i := range g.tabs.Len() {
-			g.layoutItems = append(g.layoutItems, guigui.LinearLayoutItem{Widget: g.tabs.At(i), Size: guigui.FixedSize(u)})
+			g.layoutItems = append(g.layoutItems, guigui.LinearLayoutItem{Widget: g.tabs.At(i)})
 		}
-		guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: g.layoutItems}.LayoutWidgets(context, strip, layouter)
+		vertical := guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: g.layoutItems}
+		// Record where the tabs end so the empty remainder of the strip can be
+		// used as a drop-preview target.
+		var itemBounds []image.Rectangle
+		itemBounds = vertical.AppendItemBounds(itemBounds, context, strip)
+		g.tabBarUsedY = strip.Min.Y
+		for _, ib := range itemBounds {
+			if ib.Max.Y > g.tabBarUsedY {
+				g.tabBarUsedY = ib.Max.Y
+			}
+		}
+		vertical.LayoutWidgets(context, strip, layouter)
 
 		if !g.collapsed && g.selected >= 0 && g.selected < len(g.panels) {
 			layouter.LayoutWidget(g.panels[g.selected].Content, content)
@@ -195,8 +211,10 @@ type groupTab struct {
 }
 
 func (t *groupTab) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	adder.AddWidget(&t.label)
-	t.label.SetValue(t.panel.Title)
+	if !t.group.vertical {
+		adder.AddWidget(&t.label)
+		t.label.SetValue(t.panel.Title)
+	}
 	var style basicwidget.TextStyle
 	if t.active {
 		style.SetBold(true)
@@ -226,6 +244,12 @@ func (t *groupTab) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBo
 }
 
 func (t *groupTab) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
+	if t.group.vertical {
+		face := t.face(context)
+		width, height := text.Measure(t.panel.Title, face, 0)
+		u := basicwidget.UnitSize(context)
+		return image.Pt(int(math.Ceil(height))+u/2, int(math.Ceil(width))+u/2)
+	}
 	u := basicwidget.UnitSize(context)
 	s := t.label.Measure(context, constraints)
 	return image.Pt(s.X+u/2, u)
@@ -252,4 +276,38 @@ func (t *groupTab) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBoun
 		}
 	}
 	vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), clr, false)
+	if !t.group.vertical {
+		return
+	}
+
+	face := t.face(context)
+	width, height := text.Measure(t.panel.Title, face, 0)
+	var op text.DrawOptions
+	op.ColorScale.ScaleWithColor(t.textColor(context))
+	if t.group.stripOnRight {
+		op.GeoM.Rotate(math.Pi / 2)
+		op.GeoM.Translate(float64(b.Max.X)-float64(b.Dx()-int(math.Ceil(height)))/2, float64(b.Min.Y)+(float64(b.Dy())-width)/2)
+	} else {
+		op.GeoM.Rotate(-math.Pi / 2)
+		op.GeoM.Translate(float64(b.Min.X)+(float64(b.Dx())-height)/2, float64(b.Max.Y)-(float64(b.Dy())-width)/2)
+	}
+	text.Draw(dst, t.panel.Title, face, &op)
+}
+
+func (t *groupTab) face(context *guigui.Context) *text.GoTextFace {
+	face := &text.GoTextFace{
+		Source: basicwidget.DefaultFaceSourceEntry().FaceSource,
+		Size:   basicwidget.FontSize(context),
+	}
+	if t.active {
+		face.SetVariation(text.MustParseTag("wght"), 700)
+	}
+	return face
+}
+
+func (t *groupTab) textColor(context *guigui.Context) color.RGBA {
+	if context.ColorMode() == ebiten.ColorModeLight {
+		return color.RGBA{0x20, 0x20, 0x20, 0xff}
+	}
+	return color.RGBA{0xe0, 0xe0, 0xe0, 0xff}
 }
