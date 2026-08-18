@@ -127,6 +127,9 @@ func (d *DockingLayout) SetRoot(root *DockNode) {
 }
 
 func (d *DockingLayout) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	if d.root != nil {
+		d.addNode(adder, d.root)
+	}
 	if d.left != nil {
 		adder.AddWidget(d.left)
 		d.left.onDragStart = func(panel *DockPanel, cursor image.Point) {
@@ -138,9 +141,6 @@ func (d *DockingLayout) Build(context *guigui.Context, adder *guigui.ChildAdder)
 		d.right.onDragStart = func(panel *DockPanel, cursor image.Point) {
 			d.beginDragFromBar(panel, d.right, cursor)
 		}
-	}
-	if d.root != nil {
-		d.addNode(adder, d.root)
 	}
 	d.overlay.dock = d
 	adder.AddWidget(&d.overlay)
@@ -282,6 +282,14 @@ func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, boun
 
 func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	cursor := image.Pt(ebiten.CursorPosition())
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		for _, bar := range []*edgeBar{d.left, d.right} {
+			if bar != nil && cursor.In(bar.pinRect) {
+				bar.togglePin()
+				return guigui.HandleInputByWidget(d)
+			}
+		}
+	}
 
 	// A panel or group drag is in flight.
 	if d.dragPanel != nil || d.dragGroupNode != nil {
@@ -366,19 +374,19 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 	d.dropRect = image.Rectangle{}
 	groupDrag := d.dragGroupNode != nil
 
-	// Edge bar zones take priority.
-	if cursor.In(d.leftZone) {
-		// Group drags can only create a bar (not drop onto an existing one).
-		if !groupDrag || d.left == nil {
+	// Edge bar zones take priority. The drop site is the empty remainder of
+	// the strip (or the whole strip when no bar exists yet).
+	if !groupDrag || d.left == nil {
+		if r := d.edgeBarDropRect(context, edgeSideLeft); !r.Empty() && cursor.In(r) {
 			d.dropBar = edgeSideLeft
-			d.dropRect = d.leftZone
+			d.dropRect = r
 			return
 		}
 	}
-	if cursor.In(d.rightZone) {
-		if !groupDrag || d.right == nil {
+	if !groupDrag || d.right == nil {
+		if r := d.edgeBarDropRect(context, edgeSideRight); !r.Empty() && cursor.In(r) {
 			d.dropBar = edgeSideRight
-			d.dropRect = d.rightZone
+			d.dropRect = r
 			return
 		}
 	}
@@ -487,7 +495,7 @@ func (d *DockingLayout) removePanelFromSource(panel *DockPanel, source *DockGrou
 }
 
 // moveGroupToBar moves an entire tree group onto a root edge, turning it into
-// a vertical sticky bar.
+// a vertical sticky bar (created collapsed).
 func (d *DockingLayout) moveGroupToBar(sourceNode *DockNode, side edgeSide) {
 	if d.barFor(side) != nil {
 		return
@@ -495,7 +503,8 @@ func (d *DockingLayout) moveGroupToBar(sourceNode *DockNode, side edgeSide) {
 	d.root = removeNode(d.root, sourceNode)
 	bar := newEdgeBar(side)
 	bar.group = sourceNode.group
-	bar.expanded = true
+	bar.group.vertical = true
+	bar.group.stripOnRight = side == edgeSideRight
 	d.setBar(side, bar)
 }
 
@@ -528,6 +537,38 @@ func (d *DockingLayout) barFor(side edgeSide) *edgeBar {
 		return d.right
 	}
 	return nil
+}
+
+// edgeBarDropRect returns the drop-preview area for an edge: the empty
+// remainder of the vertical strip below the existing tabs, or the whole strip
+// when no bar exists yet. It returns an empty rectangle when there is no room.
+func (d *DockingLayout) edgeBarDropRect(context *guigui.Context, side edgeSide) image.Rectangle {
+	u := basicwidget.UnitSize(context)
+	sw := stripWidth(u)
+	var zone image.Rectangle
+	var bar *edgeBar
+	if side == edgeSideLeft {
+		zone, bar = d.leftZone, d.left
+	} else {
+		zone, bar = d.rightZone, d.right
+	}
+	if bar == nil {
+		return zone
+	}
+	var strip image.Rectangle
+	if side == edgeSideLeft {
+		strip = image.Rectangle{Min: zone.Min, Max: image.Pt(zone.Min.X+sw, zone.Max.Y)}
+	} else {
+		strip = image.Rectangle{Min: image.Pt(zone.Max.X-sw, zone.Min.Y), Max: zone.Max}
+	}
+	used := bar.group.tabBarUsedY
+	if used < strip.Min.Y {
+		used = strip.Min.Y
+	}
+	if used >= strip.Max.Y {
+		return image.Rectangle{}
+	}
+	return image.Rectangle{Min: image.Pt(strip.Min.X, used), Max: image.Pt(strip.Max.X, strip.Max.Y)}
 }
 
 // setBar sets the edge bar for side (nil removes it).
