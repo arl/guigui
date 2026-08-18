@@ -273,11 +273,16 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 	d.dropRect = image.Rectangle{}
 	for i := range d.groupBounds {
 		gb := &d.groupBounds[i]
-		if gb.node == d.sourceNode || !cursor.In(gb.bounds) {
+		if !cursor.In(gb.bounds) {
 			continue
 		}
 		edge := d.dropEdgeAt(context, cursor, gb.bounds)
 		if edge == dropEdgeNone {
+			continue
+		}
+		// A tab dropped back onto its own group is only meaningful as an
+		// edge split; a center/tab-bar drop there would be a no-op.
+		if gb.node == d.sourceNode && edge == dropEdgeCenter {
 			continue
 		}
 		d.dropNode = gb.node
@@ -304,6 +309,19 @@ func (d *DockingLayout) finishDrag() {
 // movePanel removes panel from its source group and re-docks it: into target's
 // group on a center drop, or as a new group split next to target on an edge.
 func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, targetNode *DockNode, edge DropEdge) {
+	// A tab dropped back onto its own group splits it off as a sibling group.
+	if targetNode.group == source {
+		if len(source.panels) <= 1 {
+			// A sole tab is already alone in its group; nothing to split.
+			return
+		}
+		removePanelFromGroup(source, panel)
+		d.root = attachNode(d.root, targetNode, &DockNode{
+			group: &DockGroup{panels: []*DockPanel{panel}, selected: 0},
+		}, edge)
+		return
+	}
+
 	if removePanelFromGroup(source, panel) {
 		// The source group is now empty; remove it from the tree.
 		d.root = removeNode(d.root, findGroupNode(d.root, source))
