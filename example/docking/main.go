@@ -33,6 +33,7 @@ type Root struct {
 	form       formPanel
 	properties propertiesPanel
 	console    consolePanel
+	paneview   paneViewPanel
 }
 
 func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -45,6 +46,36 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 	b := widgetBounds.Bounds()
 	layouter.LayoutWidget(&r.background, b)
 	layouter.LayoutWidget(&r.dock, b)
+}
+
+// paneViewPanel hosts a PaneView to showcase the vertical stack of collapsible panes.
+type paneViewPanel struct {
+	guigui.DefaultWidget
+
+	paneView *PaneView
+	editor   *editorPanel
+	console  *consolePanel
+	form     *formPanel
+}
+
+func (p *paneViewPanel) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	p.paneView = &PaneView{}
+
+	// Create some sample panes
+	pane1 := NewPane("Properties", p.editor)
+	pane2 := NewPane("Console", p.console)
+	pane3 := NewPane("Form", p.form)
+
+	p.paneView.AddPane(pane1)
+	p.paneView.AddPane(pane2)
+	p.paneView.AddPane(pane3)
+
+	adder.AddWidget(p.paneView)
+	return nil
+}
+
+func (p *paneViewPanel) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	layouter.LayoutWidget(p.paneView, widgetBounds.Bounds())
 }
 
 // editorPanel hosts a multiline rich-text editor.
@@ -293,9 +324,17 @@ func main() {
 					second: newGroupNode(newPanel("Editor", &root.editor)),
 				},
 			},
-			second: newGroupNode(newPanel("Console", &root.console)),
+			second: newGroupNode(
+				newPanel("Console", &root.console),
+				newPanel("PaneView", &root.paneview),
+			),
 		},
 	})
+
+	// Initialize the pane view panel with references to the same widgets
+	root.paneview.editor = &root.editor
+	root.paneview.console = &root.console
+	root.paneview.form = &root.form
 
 	if err := guigui.Run(root, &guigui.RunOptions{
 		Title:      "Docking",
