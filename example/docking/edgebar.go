@@ -58,6 +58,11 @@ func newEdgeBar(side edgeSide) *edgeBar {
 
 func (b *edgeBar) isOpen() bool { return b.expanded || b.pinned }
 
+func (b *edgeBar) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
+	w.WriteBool(b.expanded)
+	w.WriteBool(b.pinned)
+}
+
 func (b *edgeBar) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	b.group.collapsed = !b.isOpen()
 	b.group.onTabClick = func(panel *DockPanel, cursor image.Point) {
@@ -89,6 +94,11 @@ func (b *edgeBar) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 	cursor := image.Pt(ebiten.CursorPosition())
 	u := basicwidget.UnitSize(context)
 
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && cursor.In(b.pinRect) {
+		b.togglePin()
+		return guigui.HandleInputByWidget(b)
+	}
+
 	// Resolve a pending tab press: click (expand/collapse/select) vs drag (move out).
 	if b.pressPanel != nil {
 		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
@@ -107,14 +117,14 @@ func (b *edgeBar) HandlePointingInput(context *guigui.Context, widgetBounds *gui
 		return guigui.HandleInputByWidget(b)
 	}
 
-	// Pin toggle.
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && cursor.In(b.pinRect) {
-		b.pinned = !b.pinned
-		guigui.RequestRebuild()
-		return guigui.HandleInputByWidget(b)
-	}
-
 	return guigui.HandleInputResult{}
+}
+
+func (b *edgeBar) togglePin() {
+	b.pressPanel = nil
+	b.pinned = !b.pinned
+	guigui.RequestRebuild()
+	guigui.RequestRedraw(b)
 }
 
 // clickTab selects the tab and expands/collapses the bar as appropriate.
