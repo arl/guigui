@@ -282,7 +282,7 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 		}
 		d.dropNode = gb.node
 		d.dropEdge = edge
-		d.dropRect = d.dropRectFor(context, cursor, gb.bounds, edge)
+		d.dropRect = d.dropRectFor(context, cursor, gb.bounds, edge, gb.node.group)
 		return
 	}
 }
@@ -457,7 +457,7 @@ func (d *DockingLayout) dropEdgeAt(context *guigui.Context, cursor image.Point, 
 	}
 }
 
-func (d *DockingLayout) dropRectFor(context *guigui.Context, cursor image.Point, b image.Rectangle, edge DropEdge) image.Rectangle {
+func (d *DockingLayout) dropRectFor(context *guigui.Context, cursor image.Point, b image.Rectangle, edge DropEdge, group *DockGroup) image.Rectangle {
 	u := basicwidget.UnitSize(context)
 	edgeX := b.Dx() / 3
 	edgeY := b.Dy() / 3
@@ -472,7 +472,13 @@ func (d *DockingLayout) dropRectFor(context *guigui.Context, cursor image.Point,
 		return image.Rectangle{Min: image.Pt(b.Min.X, b.Max.Y-edgeY), Max: b.Max}
 	case dropEdgeCenter:
 		if cursor.Y < b.Min.Y+u {
-			return image.Rectangle{Min: b.Min, Max: image.Pt(b.Max.X, b.Min.Y+u)}
+			// The panel is appended as the last tab, so highlight only the
+			// empty part of the tab bar after the existing tabs.
+			start := max(b.Min.X, group.tabBarUsed)
+			if start >= b.Max.X {
+				return image.Rectangle{}
+			}
+			return image.Rectangle{Min: image.Pt(start, b.Min.Y), Max: image.Pt(b.Max.X, b.Min.Y+u)}
 		}
 		return image.Rectangle{
 			Min: image.Pt(b.Min.X+edgeX, b.Min.Y+edgeY),
