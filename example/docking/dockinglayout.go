@@ -223,7 +223,7 @@ func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBound
 	// A panel drag is in flight.
 	if d.dragPanel != nil {
 		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-			d.updateDropTarget(cursor)
+			d.updateDropTarget(context, cursor)
 			guigui.RequestRedraw(d)
 			return guigui.HandleInputByWidget(d)
 		}
@@ -267,7 +267,7 @@ func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor ima
 }
 
 // updateDropTarget recomputes the drop zone under the cursor.
-func (d *DockingLayout) updateDropTarget(cursor image.Point) {
+func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
@@ -276,13 +276,13 @@ func (d *DockingLayout) updateDropTarget(cursor image.Point) {
 		if gb.node == d.sourceNode || !cursor.In(gb.bounds) {
 			continue
 		}
-		edge := dropEdgeAt(cursor, gb.bounds)
+		edge := d.dropEdgeAt(context, cursor, gb.bounds)
 		if edge == dropEdgeNone {
 			continue
 		}
 		d.dropNode = gb.node
 		d.dropEdge = edge
-		d.dropRect = dropRectFor(gb.bounds, edge)
+		d.dropRect = d.dropRectFor(context, cursor, gb.bounds, edge)
 		return
 	}
 }
@@ -433,9 +433,14 @@ func replaceNode(node, target, replacement *DockNode) {
 	replaceNode(node.split.second, target, replacement)
 }
 
-// dropEdgeAt returns the drop zone the cursor falls in within bounds: the
-// outer thirds are the four edges, and the middle is the center (tab).
-func dropEdgeAt(cursor image.Point, b image.Rectangle) DropEdge {
+// dropEdgeAt returns the drop zone the cursor falls in within bounds. Dropping
+// on the tab bar (the top strip) tabs the panel into the group; the outer
+// thirds are the four edge-split targets; the rest is the center.
+func (d *DockingLayout) dropEdgeAt(context *guigui.Context, cursor image.Point, b image.Rectangle) DropEdge {
+	u := basicwidget.UnitSize(context)
+	if cursor.Y < b.Min.Y+u {
+		return dropEdgeCenter
+	}
 	edgeX := b.Dx() / 3
 	edgeY := b.Dy() / 3
 	switch {
@@ -452,7 +457,8 @@ func dropEdgeAt(cursor image.Point, b image.Rectangle) DropEdge {
 	}
 }
 
-func dropRectFor(b image.Rectangle, edge DropEdge) image.Rectangle {
+func (d *DockingLayout) dropRectFor(context *guigui.Context, cursor image.Point, b image.Rectangle, edge DropEdge) image.Rectangle {
+	u := basicwidget.UnitSize(context)
 	edgeX := b.Dx() / 3
 	edgeY := b.Dy() / 3
 	switch edge {
@@ -465,6 +471,9 @@ func dropRectFor(b image.Rectangle, edge DropEdge) image.Rectangle {
 	case dropEdgeBottom:
 		return image.Rectangle{Min: image.Pt(b.Min.X, b.Max.Y-edgeY), Max: b.Max}
 	case dropEdgeCenter:
+		if cursor.Y < b.Min.Y+u {
+			return image.Rectangle{Min: b.Min, Max: image.Pt(b.Max.X, b.Min.Y+u)}
+		}
 		return image.Rectangle{
 			Min: image.Pt(b.Min.X+edgeX, b.Min.Y+edgeY),
 			Max: image.Pt(b.Max.X-edgeX, b.Max.Y-edgeY),
