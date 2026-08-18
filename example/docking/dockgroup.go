@@ -31,6 +31,10 @@ type DockGroup struct {
 	tabs guigui.WidgetSlice[*groupTab]
 
 	layoutItems []guigui.LinearLayoutItem
+
+	// tabBarUsed is the absolute X where the tabs end and the empty part of
+	// the tab bar begins. It is set during Layout.
+	tabBarUsed int
 }
 
 // pressTab selects panel and starts a drag of it.
@@ -73,10 +77,21 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	for i := range g.tabs.Len() {
 		g.layoutItems = append(g.layoutItems, guigui.LinearLayoutItem{Widget: g.tabs.At(i)})
 	}
-	(guigui.LinearLayout{
+	linear := guigui.LinearLayout{
 		Direction: guigui.LayoutDirectionHorizontal,
 		Items:     g.layoutItems,
-	}).LayoutWidgets(context, tabBar, layouter)
+	}
+	// Record where the tabs end so the empty remainder of the tab bar can be
+	// used as a drop-preview target.
+	var itemBounds []image.Rectangle
+	itemBounds = linear.AppendItemBounds(itemBounds, context, tabBar)
+	g.tabBarUsed = tabBar.Min.X
+	for _, ib := range itemBounds {
+		if ib.Max.X > g.tabBarUsed {
+			g.tabBarUsed = ib.Max.X
+		}
+	}
+	linear.LayoutWidgets(context, tabBar, layouter)
 
 	if g.selected >= 0 && g.selected < len(g.panels) {
 		layouter.LayoutWidget(g.panels[g.selected].Content, image.Rectangle{
