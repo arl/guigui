@@ -28,6 +28,10 @@ type DockGroup struct {
 	// tab was pressed.
 	onDragStart func(panel *DockPanel, cursor image.Point)
 
+	// onGroupDragStart is wired by the DockingLayout to begin moving the whole
+	// group, called when the empty part of the tab bar is pressed.
+	onGroupDragStart func(group *DockGroup, cursor image.Point)
+
 	tabs guigui.WidgetSlice[*groupTab]
 
 	layoutItems []guigui.LinearLayoutItem
@@ -48,6 +52,24 @@ func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
 	if g.onDragStart != nil {
 		g.onDragStart(panel, cursor)
 	}
+}
+
+// HandlePointingInput starts a whole-group drag when the empty part of the tab
+// bar (right of the tabs) is pressed.
+func (g *DockGroup) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		return guigui.HandleInputResult{}
+	}
+	cursor := image.Pt(ebiten.CursorPosition())
+	b := widgetBounds.Bounds()
+	u := basicwidget.UnitSize(context)
+	if cursor.Y >= b.Min.Y && cursor.Y < b.Min.Y+u && cursor.X >= g.tabBarUsed {
+		if g.onGroupDragStart != nil {
+			g.onGroupDragStart(g, cursor)
+			return guigui.HandleInputByWidget(g)
+		}
+	}
+	return guigui.HandleInputResult{}
 }
 
 func (g *DockGroup) Build(context *guigui.Context, adder *guigui.ChildAdder) error {

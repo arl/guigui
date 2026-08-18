@@ -102,6 +102,9 @@ type DockingLayout struct {
 	dropNode   *DockNode
 	dropEdge   DropEdge
 	dropRect   image.Rectangle
+
+	// Group-move drag state. Non-nil when dragging a whole group.
+	dragGroupNode *DockNode
 }
 
 // SetRoot sets the root of the docking tree.
@@ -125,6 +128,9 @@ func (d *DockingLayout) addNode(adder *guigui.ChildAdder, node *DockNode) {
 		group := node.group
 		group.onDragStart = func(panel *DockPanel, cursor image.Point) {
 			d.beginDrag(panel, group, cursor)
+		}
+		group.onGroupDragStart = func(g *DockGroup, cursor image.Point) {
+			d.beginGroupDrag(g, cursor)
 		}
 		return
 	}
@@ -220,8 +226,8 @@ func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, boun
 func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	cursor := image.Pt(ebiten.CursorPosition())
 
-	// A panel drag is in flight.
-	if d.dragPanel != nil {
+	// A panel or group drag is in flight.
+	if d.dragPanel != nil || d.dragGroupNode != nil {
 		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 			d.updateDropTarget(context, cursor)
 			guigui.RequestRedraw(d)
@@ -261,6 +267,18 @@ func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor ima
 	d.dragPanel = panel
 	d.dragGroup = group
 	d.sourceNode = findGroupNode(d.root, group)
+	d.dragGroupNode = nil
+	d.dropNode = nil
+	d.dropEdge = dropEdgeNone
+	d.dropRect = image.Rectangle{}
+}
+
+// beginGroupDrag starts moving an entire group, called from an empty-tab-bar
+// press.
+func (d *DockingLayout) beginGroupDrag(group *DockGroup, cursor image.Point) {
+	d.dragGroupNode = findGroupNode(d.root, group)
+	d.dragPanel = nil
+	d.dragGroup = nil
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
@@ -271,6 +289,7 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
+	groupDrag := d.dragGroupNode != nil
 	for i := range d.groupBounds {
 		gb := &d.groupBounds[i]
 		if !cursor.In(gb.bounds) {
@@ -280,10 +299,18 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 		if edge == dropEdgeNone {
 			continue
 		}
-		// A tab dropped back onto its own group is only meaningful as an
-		// edge split; a center/tab-bar drop there would be a no-op.
-		if gb.node == d.sourceNode && edge == dropEdgeCenter {
-			continue
+		if groupDrag {
+			// Group drags can't drop on themselves; center drops are disallowed
+			// (groups stay intact, only split onto edges).
+			if gb.node == d.dragGroupNode || edge == dropEdgeCenter {
+				continue
+			}
+		} else {
+			// A tab dropped back onto its own group is only meaningful as an
+			// edge split; a center/tab-bar drop there would be a no-op.
+			if gb.node == d.sourceNode && edge == dropEdgeCenter {
+				continue
+			}
 		}
 		d.dropNode = gb.node
 		d.dropEdge = edge
@@ -296,10 +323,13 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 func (d *DockingLayout) finishDrag() {
 	if d.dragPanel != nil && d.dropNode != nil && d.dropEdge != dropEdgeNone {
 		d.movePanel(d.dragPanel, d.dragGroup, d.dropNode, d.dropEdge)
+	} else if d.dragGroupNode != nil && d.dropNode != nil && d.dropEdge != dropEdgeNone {
+		d.moveGroup(d.dragGroupNode, d.dropNode, d.dropEdge)
 	}
 	d.dragPanel = nil
 	d.dragGroup = nil
 	d.sourceNode = nil
+	d.dragGroupNode = nil
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropRect = image.Rectangle{}
@@ -339,6 +369,13 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, targetNod
 		selected: 0,
 	}
 	d.root = attachNode(d.root, targetNode, &DockNode{group: newGroup}, edge)
+}
+
+// moveGroup re-docks an entire group (keeping its tabs intact) as a sibling
+// of targetNode, split onto edge. The source node keeps its identity.
+func (d *DockingLayout) moveGroup(sourceNode, targetNode *DockNode, edge DropEdge) {
+	d.root = removeNode(d.root, sourceNode)
+	d.root = attachNode(d.root, targetNode, sourceNode, edge)
 }
 
 // removePanelFromGroup removes panel from group, fixing the selection. It
@@ -522,7 +559,7 @@ func (d *DockingLayout) updateRatio(cursor image.Point) {
 }
 
 func (d *DockingLayout) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
-	if d.dragPanel != nil {
+	if d.dragPanel != nil || d.dragGroupNode != nil {
 		return 0, false
 	}
 	if d.dragging != nil {
