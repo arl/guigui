@@ -32,6 +32,16 @@ type DockGroup struct {
 	// group, called when the empty part of the tab bar is pressed.
 	onGroupDragStart func(group *DockGroup, cursor image.Point)
 
+	// onTabClick, when set, overrides pressTab for tab presses. Used by edge
+	// bars to implement expand/collapse/select instead of a drag.
+	onTabClick func(panel *DockPanel, cursor image.Point)
+
+	// vertical renders the tab strip on a side instead of across the top.
+	vertical     bool
+	stripOnRight bool
+	// collapsed hides the content when vertical (the bar shows only the strip).
+	collapsed bool
+
 	tabs guigui.WidgetSlice[*groupTab]
 
 	layoutItems []guigui.LinearLayoutItem
@@ -40,6 +50,9 @@ type DockGroup struct {
 	// the tab bar begins. It is set during Layout.
 	tabBarUsed int
 }
+
+// stripWidth is the width of a vertical tab strip.
+func stripWidth(u int) int { return u * 3 }
 
 // pressTab selects panel and starts a drag of it.
 func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
@@ -55,9 +68,9 @@ func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
 }
 
 // HandlePointingInput starts a whole-group drag when the empty part of the tab
-// bar (right of the tabs) is pressed.
+// bar (right of the tabs) is pressed. Vertical edge bars cannot be group-dragged.
 func (g *DockGroup) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if g.vertical || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return guigui.HandleInputResult{}
 	}
 	cursor := image.Pt(ebiten.CursorPosition())
@@ -81,7 +94,7 @@ func (g *DockGroup) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 		tab.active = i == g.selected
 		adder.AddWidget(tab)
 	}
-	if g.selected >= 0 && g.selected < len(g.panels) {
+	if !g.collapsed && g.selected >= 0 && g.selected < len(g.panels) {
 		adder.AddWidget(g.panels[g.selected].Content)
 	}
 	return nil
@@ -90,6 +103,30 @@ func (g *DockGroup) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
+
+	if g.vertical {
+		sw := stripWidth(u)
+		var strip, content image.Rectangle
+		if g.stripOnRight {
+			strip = image.Rectangle{Min: image.Pt(b.Max.X-sw, b.Min.Y), Max: b.Max}
+			content = image.Rectangle{Min: b.Min, Max: image.Pt(b.Max.X-sw, b.Max.Y)}
+		} else {
+			strip = image.Rectangle{Min: b.Min, Max: image.Pt(b.Min.X+sw, b.Max.Y)}
+			content = image.Rectangle{Min: image.Pt(b.Min.X+sw, b.Min.Y), Max: b.Max}
+		}
+
+		g.layoutItems = slices.Delete(g.layoutItems, 0, len(g.layoutItems))
+		for i := range g.tabs.Len() {
+			g.layoutItems = append(g.layoutItems, guigui.LinearLayoutItem{Widget: g.tabs.At(i), Size: guigui.FixedSize(u)})
+		}
+		guigui.LinearLayout{Direction: guigui.LayoutDirectionVertical, Items: g.layoutItems}.LayoutWidgets(context, strip, layouter)
+
+		if !g.collapsed && g.selected >= 0 && g.selected < len(g.panels) {
+			layouter.LayoutWidget(g.panels[g.selected].Content, content)
+		}
+		return
+	}
+
 	tabBar := image.Rectangle{
 		Min: b.Min,
 		Max: image.Pt(b.Max.X, b.Min.Y+u),
@@ -132,6 +169,16 @@ func (g *DockGroup) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	} else {
 		clr = color.RGBA{0x38, 0x38, 0x38, 0xff}
 	}
+	if g.vertical {
+		// Separator between the vertical strip and the content.
+		sw := stripWidth(u)
+		if g.stripOnRight {
+			vector.StrokeLine(dst, float32(b.Max.X-sw), float32(b.Min.Y), float32(b.Max.X-sw), float32(b.Max.Y), 1, clr, false)
+		} else {
+			vector.StrokeLine(dst, float32(b.Min.X+sw), float32(b.Min.Y), float32(b.Min.X+sw), float32(b.Max.Y), 1, clr, false)
+		}
+		return
+	}
 	// A separator line under the tab bar.
 	vector.StrokeLine(dst, float32(b.Min.X), float32(b.Min.Y+u), float32(b.Max.X), float32(b.Min.Y+u), 1, clr, false)
 }
@@ -162,7 +209,12 @@ func (t *groupTab) Build(context *guigui.Context, adder *guigui.ChildAdder) erro
 
 func (t *groupTab) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && widgetBounds.IsHitAtCursor() {
-		t.group.pressTab(t.panel, image.Pt(ebiten.CursorPosition()))
+		cursor := image.Pt(ebiten.CursorPosition())
+		if t.group.onTabClick != nil {
+			t.group.onTabClick(t.panel, cursor)
+		} else {
+			t.group.pressTab(t.panel, cursor)
+		}
 		return guigui.HandleInputByWidget(t)
 	}
 	return guigui.HandleInputResult{}

@@ -86,6 +86,16 @@ type DockingLayout struct {
 	root    *DockNode
 	overlay dockOverlay
 
+	// left and right are the vertical sticky tab groups on the root edges.
+	left  *edgeBar
+	right *edgeBar
+
+	// leftZone/rightZone are the drop zones for the edges (bar bounds, or the
+	// outer strip when no bar exists). rootBounds is the full layout bounds.
+	leftZone   image.Rectangle
+	rightZone  image.Rectangle
+	rootBounds image.Rectangle
+
 	dividers    []dockDivider
 	groupBounds []dockGroupBounds
 
@@ -102,6 +112,10 @@ type DockingLayout struct {
 	dropNode   *DockNode
 	dropEdge   DropEdge
 	dropRect   image.Rectangle
+	// dragFromBar is the source edge bar for a panel drag (none for tree).
+	dragFromBar edgeSide
+	// dropBar is the target edge bar for a drop (none for tree drops).
+	dropBar edgeSide
 
 	// Group-move drag state. Non-nil when dragging a whole group.
 	dragGroupNode *DockNode
@@ -113,6 +127,18 @@ func (d *DockingLayout) SetRoot(root *DockNode) {
 }
 
 func (d *DockingLayout) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	if d.left != nil {
+		adder.AddWidget(d.left)
+		d.left.onDragStart = func(panel *DockPanel, cursor image.Point) {
+			d.beginDragFromBar(panel, d.left, cursor)
+		}
+	}
+	if d.right != nil {
+		adder.AddWidget(d.right)
+		d.right.onDragStart = func(panel *DockPanel, cursor image.Point) {
+			d.beginDragFromBar(panel, d.right, cursor)
+		}
+	}
 	if d.root != nil {
 		d.addNode(adder, d.root)
 	}
@@ -143,10 +169,41 @@ func (d *DockingLayout) addNode(adder *guigui.ChildAdder, node *DockNode) {
 func (d *DockingLayout) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	d.dividers = slices.Delete(d.dividers, 0, len(d.dividers))
 	d.groupBounds = slices.Delete(d.groupBounds, 0, len(d.groupBounds))
-	if d.root != nil {
-		d.layoutNode(context, d.root, widgetBounds.Bounds(), layouter)
+	b := widgetBounds.Bounds()
+	d.rootBounds = b
+
+	u := basicwidget.UnitSize(context)
+	sw := stripWidth(u)
+	mainBounds := b
+
+	d.leftZone = image.Rectangle{Min: image.Pt(b.Min.X, b.Min.Y), Max: image.Pt(b.Min.X+sw, b.Max.Y)}
+	if d.left != nil {
+		w := sw
+		if d.left.isOpen() {
+			w = edgeOpenWidth(u)
+		}
+		leftBounds := image.Rectangle{Min: b.Min, Max: image.Pt(b.Min.X+w, b.Max.Y)}
+		layouter.LayoutWidget(d.left, leftBounds)
+		d.leftZone = leftBounds
+		mainBounds.Min.X += w
 	}
-	layouter.LayoutWidget(&d.overlay, widgetBounds.Bounds())
+
+	d.rightZone = image.Rectangle{Min: image.Pt(b.Max.X-sw, b.Min.Y), Max: b.Max}
+	if d.right != nil {
+		w := sw
+		if d.right.isOpen() {
+			w = edgeOpenWidth(u)
+		}
+		rightBounds := image.Rectangle{Min: image.Pt(b.Max.X-w, b.Min.Y), Max: b.Max}
+		layouter.LayoutWidget(d.right, rightBounds)
+		d.rightZone = rightBounds
+		mainBounds.Max.X -= w
+	}
+
+	if d.root != nil {
+		d.layoutNode(context, d.root, mainBounds, layouter)
+	}
+	layouter.LayoutWidget(&d.overlay, b)
 }
 
 func (d *DockingLayout) dividerThickness(context *guigui.Context) int {
@@ -268,8 +325,23 @@ func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor ima
 	d.dragGroup = group
 	d.sourceNode = findGroupNode(d.root, group)
 	d.dragGroupNode = nil
+	d.dragFromBar = edgeSideNone
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
+	d.dropBar = edgeSideNone
+	d.dropRect = image.Rectangle{}
+}
+
+// beginDragFromBar starts moving a panel out of a vertical edge bar.
+func (d *DockingLayout) beginDragFromBar(panel *DockPanel, bar *edgeBar, cursor image.Point) {
+	d.dragPanel = panel
+	d.dragGroup = bar.group
+	d.sourceNode = nil
+	d.dragGroupNode = nil
+	d.dragFromBar = bar.side
+	d.dropNode = nil
+	d.dropEdge = dropEdgeNone
+	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
 }
 
@@ -279,8 +351,10 @@ func (d *DockingLayout) beginGroupDrag(group *DockGroup, cursor image.Point) {
 	d.dragGroupNode = findGroupNode(d.root, group)
 	d.dragPanel = nil
 	d.dragGroup = nil
+	d.dragFromBar = edgeSideNone
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
+	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
 }
 
@@ -288,8 +362,27 @@ func (d *DockingLayout) beginGroupDrag(group *DockGroup, cursor image.Point) {
 func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
+	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
 	groupDrag := d.dragGroupNode != nil
+
+	// Edge bar zones take priority.
+	if cursor.In(d.leftZone) {
+		// Group drags can only create a bar (not drop onto an existing one).
+		if !groupDrag || d.left == nil {
+			d.dropBar = edgeSideLeft
+			d.dropRect = d.leftZone
+			return
+		}
+	}
+	if cursor.In(d.rightZone) {
+		if !groupDrag || d.right == nil {
+			d.dropBar = edgeSideRight
+			d.dropRect = d.rightZone
+			return
+		}
+	}
+
 	for i := range d.groupBounds {
 		gb := &d.groupBounds[i]
 		if !cursor.In(gb.bounds) {
@@ -321,26 +414,38 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 
 // finishDrag applies the pending drop, if any, and clears the drag state.
 func (d *DockingLayout) finishDrag() {
-	if d.dragPanel != nil && d.dropNode != nil && d.dropEdge != dropEdgeNone {
-		d.movePanel(d.dragPanel, d.dragGroup, d.dropNode, d.dropEdge)
-	} else if d.dragGroupNode != nil && d.dropNode != nil && d.dropEdge != dropEdgeNone {
-		d.moveGroup(d.dragGroupNode, d.dropNode, d.dropEdge)
+	switch {
+	case d.dragGroupNode != nil:
+		if d.dropBar != edgeSideNone {
+			d.moveGroupToBar(d.dragGroupNode, d.dropBar)
+		} else if d.dropNode != nil && d.dropEdge != dropEdgeNone {
+			d.moveGroup(d.dragGroupNode, d.dropNode, d.dropEdge)
+		}
+	case d.dragPanel != nil:
+		if d.dropBar != edgeSideNone {
+			d.movePanelToBar(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropBar)
+		} else if d.dropNode != nil && d.dropEdge != dropEdgeNone {
+			d.movePanel(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropNode, d.dropEdge)
+		}
 	}
 	d.dragPanel = nil
 	d.dragGroup = nil
 	d.sourceNode = nil
 	d.dragGroupNode = nil
+	d.dragFromBar = edgeSideNone
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
+	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
 	guigui.RequestRedraw(d)
 }
 
-// movePanel removes panel from its source group and re-docks it: into target's
-// group on a center drop, or as a new group split next to target on an edge.
-func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, targetNode *DockNode, edge DropEdge) {
+// movePanel removes panel from its source (a tree group or an edge bar) and
+// re-docks it: into target's group on a center drop, or as a new group split
+// next to target on an edge.
+func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, fromBar edgeSide, targetNode *DockNode, edge DropEdge) {
 	// A tab dropped back onto its own group splits it off as a sibling group.
-	if targetNode.group == source {
+	if fromBar == edgeSideNone && targetNode.group == source {
 		if len(source.panels) <= 1 {
 			// A sole tab is already alone in its group; nothing to split.
 			return
@@ -352,10 +457,7 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, targetNod
 		return
 	}
 
-	if removePanelFromGroup(source, panel) {
-		// The source group is now empty; remove it from the tree.
-		d.root = removeNode(d.root, findGroupNode(d.root, source))
-	}
+	d.removePanelFromSource(panel, source, fromBar)
 
 	if edge == dropEdgeCenter {
 		target := targetNode.group
@@ -369,6 +471,73 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, targetNod
 		selected: 0,
 	}
 	d.root = attachNode(d.root, targetNode, &DockNode{group: newGroup}, edge)
+}
+
+// removePanelFromSource removes panel from its source group, and removes the
+// source from the tree or the edge bar if it became empty.
+func (d *DockingLayout) removePanelFromSource(panel *DockPanel, source *DockGroup, fromBar edgeSide) {
+	if !removePanelFromGroup(source, panel) {
+		return
+	}
+	if fromBar != edgeSideNone {
+		d.setBar(fromBar, nil)
+		return
+	}
+	d.root = removeNode(d.root, findGroupNode(d.root, source))
+}
+
+// moveGroupToBar moves an entire tree group onto a root edge, turning it into
+// a vertical sticky bar.
+func (d *DockingLayout) moveGroupToBar(sourceNode *DockNode, side edgeSide) {
+	if d.barFor(side) != nil {
+		return
+	}
+	d.root = removeNode(d.root, sourceNode)
+	bar := newEdgeBar(side)
+	bar.group = sourceNode.group
+	bar.expanded = true
+	d.setBar(side, bar)
+}
+
+// movePanelToBar moves a single panel onto a root edge, creating a bar if
+// needed or adding the panel to the existing bar's group.
+func (d *DockingLayout) movePanelToBar(panel *DockPanel, source *DockGroup, fromBar edgeSide, side edgeSide) {
+	if fromBar == side {
+		// Dropped back onto the bar it came from; nothing to do.
+		return
+	}
+	d.removePanelFromSource(panel, source, fromBar)
+	bar := d.barFor(side)
+	if bar == nil {
+		bar = newEdgeBar(side)
+		bar.group.panels = []*DockPanel{panel}
+		bar.group.selected = 0
+		d.setBar(side, bar)
+		return
+	}
+	bar.group.panels = append(bar.group.panels, panel)
+	bar.group.selected = len(bar.group.panels) - 1
+}
+
+// barFor returns the edge bar for side, or nil.
+func (d *DockingLayout) barFor(side edgeSide) *edgeBar {
+	switch side {
+	case edgeSideLeft:
+		return d.left
+	case edgeSideRight:
+		return d.right
+	}
+	return nil
+}
+
+// setBar sets the edge bar for side (nil removes it).
+func (d *DockingLayout) setBar(side edgeSide, bar *edgeBar) {
+	switch side {
+	case edgeSideLeft:
+		d.left = bar
+	case edgeSideRight:
+		d.right = bar
+	}
 }
 
 // moveGroup re-docks an entire group (keeping its tabs intact) as a sibling
