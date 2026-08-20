@@ -106,12 +106,14 @@ type DockingLayout struct {
 	dragAvailable  int
 
 	// Panel-move drag state.
-	dragPanel  *DockPanel
-	dragGroup  *DockGroup
-	sourceNode *DockNode
-	dropNode   *DockNode
-	dropEdge   DropEdge
-	dropRect   image.Rectangle
+	dragPanel    *DockPanel
+	dragGroup    *DockGroup
+	sourceNode   *DockNode
+	dropNode     *DockNode
+	dropEdge     DropEdge
+	dropRect     image.Rectangle
+	dropTabGroup *DockGroup
+	dropTabIndex int
 	// dragFromBar is the source edge bar for a panel drag (none for tree).
 	dragFromBar edgeSide
 	// dropBar is the target edge bar for a drop (none for tree drops).
@@ -338,6 +340,8 @@ func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor ima
 	d.dropEdge = dropEdgeNone
 	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
+	d.dropTabGroup = nil
+	d.dropTabIndex = 0
 }
 
 // beginDragFromBar starts moving a panel out of a vertical edge bar.
@@ -351,6 +355,8 @@ func (d *DockingLayout) beginDragFromBar(panel *DockPanel, bar *edgeBar, cursor 
 	d.dropEdge = dropEdgeNone
 	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
+	d.dropTabGroup = nil
+	d.dropTabIndex = 0
 }
 
 // beginGroupDrag starts moving an entire group, called from an empty-tab-bar
@@ -364,6 +370,8 @@ func (d *DockingLayout) beginGroupDrag(group *DockGroup, cursor image.Point) {
 	d.dropEdge = dropEdgeNone
 	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
+	d.dropTabGroup = nil
+	d.dropTabIndex = 0
 }
 
 // updateDropTarget recomputes the drop zone under the cursor.
@@ -372,7 +380,35 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 	d.dropEdge = dropEdgeNone
 	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
+	d.dropTabGroup = nil
+	d.dropTabIndex = 0
 	groupDrag := d.dragGroupNode != nil
+
+	// A tab strip is more specific than the root edge zone, which may overlap
+	// the first tab at the left or right edge of the layout.
+	for i := range d.groupBounds {
+		gb := &d.groupBounds[i]
+		if !cursor.In(gb.bounds) {
+			continue
+		}
+		if tabIndex, ok := gb.node.group.tabInsertionIndex(cursor); ok && !(groupDrag && gb.node == d.dragGroupNode) {
+			d.dropTabGroup = gb.node.group
+			d.dropTabIndex = tabIndex
+			d.dropRect = gb.node.group.tabInsertionRect(tabIndex)
+			return
+		}
+	}
+	for _, bar := range []*edgeBar{d.left, d.right} {
+		if bar == nil {
+			continue
+		}
+		if tabIndex, ok := bar.group.tabInsertionIndex(cursor); ok {
+			d.dropTabGroup = bar.group
+			d.dropTabIndex = tabIndex
+			d.dropRect = bar.group.tabInsertionRect(tabIndex)
+			return
+		}
+	}
 
 	// Edge bar zones take priority. The drop site is the empty remainder of
 	// the strip (or the whole strip when no bar exists yet).
@@ -424,13 +460,17 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 func (d *DockingLayout) finishDrag() {
 	switch {
 	case d.dragGroupNode != nil:
-		if d.dropBar != edgeSideNone {
+		if d.dropTabGroup != nil {
+			d.insertGroupAt(d.dragGroupNode, d.dropTabGroup, d.dropTabIndex)
+		} else if d.dropBar != edgeSideNone {
 			d.moveGroupToBar(d.dragGroupNode, d.dropBar)
 		} else if d.dropNode != nil && d.dropEdge != dropEdgeNone {
 			d.moveGroup(d.dragGroupNode, d.dropNode, d.dropEdge)
 		}
 	case d.dragPanel != nil:
-		if d.dropBar != edgeSideNone {
+		if d.dropTabGroup != nil {
+			d.insertPanelAt(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropTabGroup, d.dropTabIndex)
+		} else if d.dropBar != edgeSideNone {
 			d.movePanelToBar(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropBar)
 		} else if d.dropNode != nil && d.dropEdge != dropEdgeNone {
 			d.movePanel(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropNode, d.dropEdge)
@@ -445,6 +485,8 @@ func (d *DockingLayout) finishDrag() {
 	d.dropEdge = dropEdgeNone
 	d.dropBar = edgeSideNone
 	d.dropRect = image.Rectangle{}
+	d.dropTabGroup = nil
+	d.dropTabIndex = 0
 	guigui.RequestRedraw(d)
 }
 
@@ -479,6 +521,43 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, fromBar e
 		selected: 0,
 	}
 	d.root = attachNode(d.root, targetNode, &DockNode{group: newGroup}, edge)
+}
+
+func (d *DockingLayout) insertPanelAt(panel *DockPanel, source *DockGroup, fromBar edgeSide, target *DockGroup, index int) {
+	if source == target {
+		oldIndex := slices.Index(source.panels, panel)
+		if oldIndex < 0 {
+			return
+		}
+		if oldIndex < index {
+			index--
+		}
+		removePanelFromGroup(source, panel)
+	} else {
+		d.removePanelFromSource(panel, source, fromBar)
+	}
+
+	index = max(0, min(index, len(target.panels)))
+	target.panels = append(target.panels, nil)
+	copy(target.panels[index+1:], target.panels[index:])
+	target.panels[index] = panel
+	target.selected = index
+}
+
+func (d *DockingLayout) insertGroupAt(sourceNode *DockNode, target *DockGroup, index int) {
+	source := sourceNode.group
+	if source == nil || source == target {
+		return
+	}
+	d.root = removeNode(d.root, sourceNode)
+
+	index = max(0, min(index, len(target.panels)))
+	panels := make([]*DockPanel, 0, len(target.panels)+len(source.panels))
+	panels = append(panels, target.panels[:index]...)
+	panels = append(panels, source.panels...)
+	panels = append(panels, target.panels[index:]...)
+	target.panels = panels
+	target.selected = index + source.selected
 }
 
 // removePanelFromSource removes panel from its source group, and removes the
