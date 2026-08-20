@@ -34,6 +34,7 @@ type Root struct {
 	properties propertiesPanel
 	console    consolePanel
 	paneview   paneViewPanel
+	settings   settingsPanel
 }
 
 func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -333,6 +334,7 @@ func main() {
 			second: newGroupNode(
 				newPanel("Console", &root.console),
 				newPanel("PaneView", &root.paneview),
+				newPanel("Settings", &root.settings),
 			),
 		},
 	})
