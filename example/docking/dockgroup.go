@@ -54,6 +54,8 @@ type DockGroup struct {
 	// tabBarUsedY is the absolute Y where the tabs end and the empty part of
 	// the vertical strip begins. It is set during Layout (vertical groups).
 	tabBarUsedY int
+	tabBounds   []image.Rectangle
+	tabBar      image.Rectangle
 }
 
 // stripWidth is the width of a vertical tab strip.
@@ -129,6 +131,9 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 		// used as a drop-preview target.
 		var itemBounds []image.Rectangle
 		itemBounds = vertical.AppendItemBounds(itemBounds, context, strip)
+		g.tabBounds = slices.Delete(g.tabBounds, 0, len(g.tabBounds))
+		g.tabBounds = append(g.tabBounds, itemBounds...)
+		g.tabBar = strip
 		g.tabBarUsedY = strip.Min.Y
 		for _, ib := range itemBounds {
 			if ib.Max.Y > g.tabBarUsedY {
@@ -160,6 +165,9 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	// used as a drop-preview target.
 	var itemBounds []image.Rectangle
 	itemBounds = linear.AppendItemBounds(itemBounds, context, tabBar)
+	g.tabBounds = slices.Delete(g.tabBounds, 0, len(g.tabBounds))
+	g.tabBounds = append(g.tabBounds, itemBounds...)
+	g.tabBar = tabBar
 	g.tabBarUsed = tabBar.Min.X
 	for _, ib := range itemBounds {
 		if ib.Max.X > g.tabBarUsed {
@@ -173,6 +181,54 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 			Min: image.Pt(b.Min.X, tabBar.Max.Y),
 			Max: b.Max,
 		})
+	}
+}
+
+func (g *DockGroup) tabInsertionIndex(cursor image.Point) (int, bool) {
+	if !cursor.In(g.tabBar) {
+		return 0, false
+	}
+	for i, bounds := range g.tabBounds {
+		if g.vertical {
+			if cursor.Y < bounds.Min.Y+bounds.Dy()/2 {
+				return i, true
+			}
+		} else if cursor.X < bounds.Min.X+bounds.Dx()/2 {
+			return i, true
+		}
+	}
+	return len(g.tabBounds), true
+}
+
+func (g *DockGroup) tabInsertionRect(index int) image.Rectangle {
+	const markerWidth = 3
+	if g.vertical {
+		if index >= len(g.tabBounds) {
+			y := g.tabBar.Min.Y
+			if len(g.tabBounds) > 0 {
+				y = g.tabBounds[len(g.tabBounds)-1].Max.Y
+			}
+			return image.Rectangle{Min: image.Pt(g.tabBar.Min.X, y), Max: g.tabBar.Max}
+		}
+		y := g.tabBar.Max.Y
+		y = g.tabBounds[index].Min.Y
+		return image.Rectangle{
+			Min: image.Pt(g.tabBar.Min.X, y-markerWidth/2),
+			Max: image.Pt(g.tabBar.Max.X, y+(markerWidth+1)/2),
+		}
+	}
+	if index >= len(g.tabBounds) {
+		x := g.tabBar.Min.X
+		if len(g.tabBounds) > 0 {
+			x = g.tabBounds[len(g.tabBounds)-1].Max.X
+		}
+		return image.Rectangle{Min: image.Pt(x, g.tabBar.Min.Y), Max: g.tabBar.Max}
+	}
+	x := g.tabBar.Max.X
+	x = g.tabBounds[index].Min.X
+	return image.Rectangle{
+		Min: image.Pt(x-markerWidth/2, g.tabBar.Min.Y),
+		Max: image.Pt(x+(markerWidth+1)/2, g.tabBar.Max.Y),
 	}
 }
 
