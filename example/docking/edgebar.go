@@ -182,9 +182,9 @@ func (b *edgeBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBound
 
 	var bg color.RGBA
 	if context.ColorMode() == ebiten.ColorModeLight {
-		bg = color.RGBA{0xd8, 0xd8, 0xd8, 0xff}
+		bg = color.RGBA{0xee, 0xf0, 0xf2, 0xff}
 	} else {
-		bg = color.RGBA{0x28, 0x28, 0x28, 0xff}
+		bg = color.RGBA{0x23, 0x26, 0x2a, 0xff}
 	}
 	if b.side == edgeSideLeft {
 		vector.DrawFilledRect(dst, float32(bnds.Min.X), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
@@ -195,17 +195,9 @@ func (b *edgeBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBound
 	// Pin toggle: filled when pinned, hollow otherwise.
 	var pin color.RGBA
 	if b.pinned {
-		if context.ColorMode() == ebiten.ColorModeLight {
-			pin = color.RGBA{0x1a, 0x6e, 0xf5, 0xff}
-		} else {
-			pin = color.RGBA{0x5a, 0x9e, 0xf5, 0xff}
-		}
+		pin = color.RGBA{0x2f, 0x80, 0xed, 0xff}
 	} else {
-		if context.ColorMode() == ebiten.ColorModeLight {
-			pin = color.RGBA{0x80, 0x80, 0x80, 0xff}
-		} else {
-			pin = color.RGBA{0x80, 0x80, 0x80, 0xff}
-		}
+		pin = color.RGBA{0x6b, 0x73, 0x7d, 0xff}
 	}
 	pr := b.pinRect
 	cx := float32(pr.Min.X + pr.Dx()/2)

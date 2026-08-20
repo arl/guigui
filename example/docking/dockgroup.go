@@ -235,13 +235,20 @@ func (g *DockGroup) tabInsertionRect(index int) image.Rectangle {
 func (g *DockGroup) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
+	rail := color.RGBA{0x23, 0x26, 0x2a, 0xff}
 	var clr color.RGBA
 	if context.ColorMode() == ebiten.ColorModeLight {
+		rail = color.RGBA{0xee, 0xf0, 0xf2, 0xff}
 		clr = color.RGBA{0xc0, 0xc0, 0xc0, 0xff}
 	} else {
 		clr = color.RGBA{0x38, 0x38, 0x38, 0xff}
 	}
 	if g.vertical {
+		if g.stripOnRight {
+			vector.DrawFilledRect(dst, float32(b.Max.X-stripWidth(u)), float32(b.Min.Y), float32(stripWidth(u)), float32(b.Dy()), rail, false)
+		} else {
+			vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(stripWidth(u)), float32(b.Dy()), rail, false)
+		}
 		// Separator between the vertical strip and the content.
 		sw := stripWidth(u)
 		if g.stripOnRight {
@@ -251,6 +258,7 @@ func (g *DockGroup) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 		}
 		return
 	}
+	vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(u), rail, false)
 	// A separator line under the tab bar.
 	vector.StrokeLine(dst, float32(b.Min.X), float32(b.Min.Y+u), float32(b.Max.X), float32(b.Min.Y+u), 1, clr, false)
 }
@@ -322,16 +330,28 @@ func (t *groupTab) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBoun
 		if context.ColorMode() == ebiten.ColorModeLight {
 			clr = color.RGBA{0xff, 0xff, 0xff, 0xff}
 		} else {
-			clr = color.RGBA{0x30, 0x30, 0x30, 0xff}
+			clr = color.RGBA{0x2d, 0x32, 0x38, 0xff}
 		}
 	} else {
 		if context.ColorMode() == ebiten.ColorModeLight {
-			clr = color.RGBA{0xe2, 0xe2, 0xe2, 0xff}
+			clr = color.RGBA{0xe5, 0xe8, 0xeb, 0xff}
 		} else {
-			clr = color.RGBA{0x22, 0x22, 0x22, 0xff}
+			clr = color.RGBA{0x23, 0x26, 0x2a, 0xff}
 		}
 	}
 	vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), clr, false)
+	if t.active {
+		accent := color.RGBA{0x2f, 0x80, 0xed, 0xff}
+		if t.group.vertical {
+			if t.group.stripOnRight {
+				vector.DrawFilledRect(dst, float32(b.Max.X-2), float32(b.Min.Y), 2, float32(b.Dy()), accent, false)
+			} else {
+				vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), 2, float32(b.Dy()), accent, false)
+			}
+		} else {
+			vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), 2, accent, false)
+		}
+	}
 	if !t.group.vertical {
 		return
 	}
