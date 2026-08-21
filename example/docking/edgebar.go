@@ -187,9 +187,9 @@ func (b *edgeBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		bg = color.RGBA{0x23, 0x26, 0x2a, 0xff}
 	}
 	if b.side == edgeSideLeft {
-		vector.DrawFilledRect(dst, float32(bnds.Min.X), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
+		vector.FillRect(dst, float32(bnds.Min.X), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
 	} else {
-		vector.DrawFilledRect(dst, float32(bnds.Max.X-sw), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
+		vector.FillRect(dst, float32(bnds.Max.X-sw), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
 	}
 
 	// Pin toggle: filled when pinned, hollow otherwise.

@@ -91,7 +91,7 @@ func (h *paneHeader) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBo
 	} else {
 		bg = color.RGBA{0x30, 0x30, 0x30, 0xff}
 	}
-	vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), bg, false)
+	vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), bg, false)
 
 	// Separator at the bottom of the header.
 	var sep color.RGBA
@@ -114,7 +114,7 @@ func (h *paneHeader) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBo
 	if h.pane.Expanded {
 		// "▼" — down-pointing triangle (filled rect for simplicity).
 		r := float32(u / 10)
-		vector.DrawFilledRect(dst, float32(cx)-r, float32(cy)-r, r*2, r*2, arrowClr, false)
+		vector.FillRect(dst, float32(cx)-r, float32(cy)-r, r*2, r*2, arrowClr, false)
 	} else {
 		// "▶" — right-pointing triangle.
 		r := float32(u / 10)
