@@ -1,9 +1,13 @@
 package dock
 
 import (
+	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"slices"
+	"sort"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -49,15 +53,17 @@ const (
 // Node is a node in the docking tree. Exactly one of group or split is
 // non-nil.
 type Node struct {
+	ID     string
 	group  *group
 	split  *split
 	panels []*Panel
 }
 
-// Group creates a tab group containing panels.
-func Group(panels ...*Panel) *Node {
+// Group creates a named leaf node containing panels. ID must be stable across
+// application runs when the node participates in layout serialization.
+func Group(id string, panels ...*Panel) *Node {
 	panels = append([]*Panel(nil), panels...)
-	return &Node{group: &group{panels: append([]*Panel(nil), panels...)}, panels: panels}
+	return &Node{ID: id, group: &group{panels: append([]*Panel(nil), panels...)}, panels: panels}
 }
 
 // Split creates a split node with the provided child nodes and ratio.
@@ -116,6 +122,7 @@ func (o *dockOverlay) Draw(context *guigui.Context, widgetBounds *guigui.WidgetB
 // tab (center) or as a new group split onto an edge.
 type Layout struct {
 	guigui.DefaultWidget
+	redrawTarget guigui.Widget
 
 	root    *Node
 	overlay dockOverlay
@@ -157,6 +164,332 @@ type Layout struct {
 	dragGroupNode *Node
 }
 
+func (d *Layout) requestRedraw() {
+	if d.redrawTarget != nil {
+		guigui.RequestRedraw(d.redrawTarget)
+		return
+	}
+	guigui.RequestRedraw(d)
+}
+
+// Root owns a layout and the stable leaf nodes that may appear in it. It is a
+// widget and can be used anywhere a [guigui.Widget] is accepted.
+type Root struct {
+	guigui.DefaultWidget
+	layout Layout
+	nodes  map[string]*Node
+}
+
+// NewRoot creates a serializable layout root. initial is the starting tree;
+// nodes may include registered leaves that are initially absent.
+func NewRoot(initial *Node, nodes ...*Node) (*Root, error) {
+	r := &Root{nodes: make(map[string]*Node)}
+	for _, node := range append(leafNodes(initial), nodes...) {
+		if node == nil || node.group == nil {
+			return nil, fmt.Errorf("dock: registered node must be a leaf")
+		}
+		if node.ID == "" {
+			return nil, fmt.Errorf("dock: registered node has an empty ID")
+		}
+		if existing := r.nodes[node.ID]; existing != nil && existing != node {
+			return nil, fmt.Errorf("dock: duplicate node ID %q", node.ID)
+		}
+		r.nodes[node.ID] = node
+	}
+	r.layout.SetRoot(initial)
+	return r, nil
+}
+
+// Build implements [guigui.Widget.Build].
+func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+	r.layout.redrawTarget = r
+	return r.layout.Build(context, adder)
+}
+
+// Layout implements [guigui.Widget.Layout].
+func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+	r.layout.Layout(context, widgetBounds, layouter)
+}
+
+// HandlePointingInput implements [guigui.Widget.HandlePointingInput].
+func (r *Root) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+	return r.layout.HandlePointingInput(context, widgetBounds)
+}
+
+// CursorShape implements [guigui.Widget.CursorShape].
+func (r *Root) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+	return r.layout.CursorShape(context, widgetBounds)
+}
+
+// Draw implements [guigui.Widget.Draw].
+func (r *Root) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	r.layout.Draw(context, widgetBounds, dst)
+}
+
+// Contains reports whether node currently contributes panels to the layout.
+func (r *Root) Contains(node *Node) bool { return r.layout.Contains(node) }
+
+// Add adds node relative to target.
+func (r *Root) Add(node, target *Node, position Position) bool {
+	if !r.layout.Add(node, target, position) {
+		return false
+	}
+	guigui.RequestRedraw(r)
+	return true
+}
+
+// Remove removes node from the layout.
+func (r *Root) Remove(node *Node) bool {
+	if !r.layout.Remove(node) {
+		return false
+	}
+	guigui.RequestRedraw(r)
+	return true
+}
+
+type rootSnapshot struct {
+	Version int               `json:"version"`
+	Tree    *snapshotNode     `json:"tree,omitempty"`
+	Left    *snapshotTabGroup `json:"left,omitempty"`
+	Right   *snapshotTabGroup `json:"right,omitempty"`
+}
+
+type snapshotNode struct {
+	Group *snapshotTabGroup `json:"group,omitempty"`
+	Split *snapshotSplit    `json:"split,omitempty"`
+}
+
+type snapshotSplit struct {
+	Direction Direction     `json:"direction"`
+	Ratio     float64       `json:"ratio"`
+	First     *snapshotNode `json:"first"`
+	Second    *snapshotNode `json:"second"`
+}
+
+type snapshotTabGroup struct {
+	Nodes    []string `json:"nodes"`
+	Selected int      `json:"selected"`
+}
+
+// MarshalJSON serializes only the docking structure and stable node IDs.
+func (r *Root) MarshalJSON() ([]byte, error) {
+	if r == nil {
+		return []byte("null"), nil
+	}
+	snapshot, err := r.snapshot()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(snapshot)
+}
+
+// ApplyJSON validates and applies a layout snapshot atomically. Every node ID
+// in the JSON must be registered with this Root; absent registered nodes remain
+// absent from the restored layout.
+func (r *Root) ApplyJSON(data []byte) error {
+	var snapshot rootSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return fmt.Errorf("dock: decode layout: %w", err)
+	}
+	tree, left, right, err := r.layoutFromSnapshot(&snapshot)
+	if err != nil {
+		return err
+	}
+	r.layout.root = tree
+	r.layout.left = newEdgeBarFromGroup(edgeSideLeft, left)
+	r.layout.right = newEdgeBarFromGroup(edgeSideRight, right)
+	r.layout.dragPanel = nil
+	r.layout.dragGroup = nil
+	r.layout.dragGroupNode = nil
+	guigui.RequestRebuild()
+	guigui.RequestRedraw(r)
+	return nil
+}
+
+func (r *Root) layoutFromSnapshot(snapshot *rootSnapshot) (*Node, *group, *group, error) {
+	if snapshot.Version != 1 {
+		return nil, nil, nil, fmt.Errorf("dock: unsupported layout version %d", snapshot.Version)
+	}
+	seen := make(map[string]struct{})
+	tree, err := r.nodeFromSnapshot(snapshot.Tree, seen)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	left, err := r.groupFromSnapshot(snapshot.Left, seen)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	right, err := r.groupFromSnapshot(snapshot.Right, seen)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return tree, left, right, nil
+}
+
+func (r *Root) snapshot() (rootSnapshot, error) {
+	tree, err := r.snapshotNode(r.layout.root)
+	if err != nil {
+		return rootSnapshot{}, err
+	}
+	left, err := r.snapshotGroup(r.layout.left)
+	if err != nil {
+		return rootSnapshot{}, err
+	}
+	right, err := r.snapshotGroup(r.layout.right)
+	if err != nil {
+		return rootSnapshot{}, err
+	}
+	return rootSnapshot{Version: 1, Tree: tree, Left: left, Right: right}, nil
+}
+
+func (r *Root) snapshotNode(node *Node) (*snapshotNode, error) {
+	if node == nil {
+		return nil, nil
+	}
+	if node.group != nil {
+		group, err := r.snapshotGroupFromGroup(node.group)
+		if err != nil {
+			return nil, err
+		}
+		return &snapshotNode{Group: group}, nil
+	}
+	if node.split == nil {
+		return nil, fmt.Errorf("dock: node has neither a group nor a split")
+	}
+	first, err := r.snapshotNode(node.split.first)
+	if err != nil {
+		return nil, err
+	}
+	second, err := r.snapshotNode(node.split.second)
+	if err != nil {
+		return nil, err
+	}
+	return &snapshotNode{Split: &snapshotSplit{
+		Direction: node.split.direction,
+		Ratio:     node.split.ratio,
+		First:     first,
+		Second:    second,
+	}}, nil
+}
+
+func (r *Root) snapshotGroup(bar *edgeBar) (*snapshotTabGroup, error) {
+	if bar == nil {
+		return nil, nil
+	}
+	return r.snapshotGroupFromGroup(bar.group)
+}
+
+func (r *Root) snapshotGroupFromGroup(current *group) (*snapshotTabGroup, error) {
+	if current == nil {
+		return nil, nil
+	}
+	type entry struct {
+		id    string
+		index int
+	}
+	entries := make([]entry, 0, len(r.nodes))
+	covered := make(map[*Panel]struct{})
+	for id, node := range r.nodes {
+		if !groupContainsPanels(current, node.panels) {
+			continue
+		}
+		index := slices.Index(current.panels, node.panels[0])
+		entries = append(entries, entry{id: id, index: index})
+		for _, panel := range node.panels {
+			covered[panel] = struct{}{}
+		}
+	}
+	if len(covered) != len(current.panels) {
+		return nil, fmt.Errorf("dock: a tab group contains panels without a registered node")
+	}
+	for _, panel := range current.panels {
+		if _, ok := covered[panel]; !ok {
+			return nil, fmt.Errorf("dock: a tab group contains panels without a registered node")
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].index < entries[j].index })
+	result := &snapshotTabGroup{Selected: current.selected, Nodes: make([]string, len(entries))}
+	for i, entry := range entries {
+		result.Nodes[i] = entry.id
+	}
+	return result, nil
+}
+
+func (r *Root) nodeFromSnapshot(snapshot *snapshotNode, seen map[string]struct{}) (*Node, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	if snapshot.Group != nil && snapshot.Split != nil {
+		return nil, fmt.Errorf("dock: snapshot node has both a group and a split")
+	}
+	if snapshot.Group != nil {
+		group, err := r.groupFromSnapshot(snapshot.Group, seen)
+		if err != nil {
+			return nil, err
+		}
+		return &Node{group: group}, nil
+	}
+	if snapshot.Split == nil {
+		return nil, fmt.Errorf("dock: snapshot node has neither a group nor a split")
+	}
+	if snapshot.Split.Direction != Horizontal && snapshot.Split.Direction != Vertical {
+		return nil, fmt.Errorf("dock: invalid split direction %d", snapshot.Split.Direction)
+	}
+	if math.IsNaN(snapshot.Split.Ratio) || math.IsInf(snapshot.Split.Ratio, 0) || snapshot.Split.Ratio <= 0 || snapshot.Split.Ratio >= 1 {
+		return nil, fmt.Errorf("dock: invalid split ratio %v", snapshot.Split.Ratio)
+	}
+	first, err := r.nodeFromSnapshot(snapshot.Split.First, seen)
+	if err != nil {
+		return nil, err
+	}
+	second, err := r.nodeFromSnapshot(snapshot.Split.Second, seen)
+	if err != nil {
+		return nil, err
+	}
+	if first == nil || second == nil {
+		return nil, fmt.Errorf("dock: split must have two children")
+	}
+	return &Node{split: &split{direction: snapshot.Split.Direction, ratio: snapshot.Split.Ratio, first: first, second: second}}, nil
+}
+
+func (r *Root) groupFromSnapshot(snapshot *snapshotTabGroup, seen map[string]struct{}) (*group, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	if len(snapshot.Nodes) == 0 {
+		return nil, fmt.Errorf("dock: tab group has no nodes")
+	}
+	panels := make([]*Panel, 0)
+	for _, id := range snapshot.Nodes {
+		if _, ok := seen[id]; ok {
+			return nil, fmt.Errorf("dock: node ID %q appears more than once", id)
+		}
+		node := r.nodes[id]
+		if node == nil {
+			return nil, fmt.Errorf("dock: snapshot references unknown node ID %q", id)
+		}
+		seen[id] = struct{}{}
+		panels = append(panels, node.panels...)
+	}
+	if snapshot.Selected < 0 || snapshot.Selected >= len(panels) {
+		return nil, fmt.Errorf("dock: invalid selected tab index %d", snapshot.Selected)
+	}
+	return &group{panels: panels, selected: snapshot.Selected}, nil
+}
+
+func leafNodes(node *Node) []*Node {
+	if node == nil {
+		return nil
+	}
+	if node.group != nil {
+		return []*Node{node}
+	}
+	if node.split == nil {
+		return nil
+	}
+	return append(leafNodes(node.split.first), leafNodes(node.split.second)...)
+}
+
 // SetRoot sets the root of the docking tree.
 func (d *Layout) SetRoot(root *Node) {
 	d.root = root
@@ -183,7 +516,7 @@ func (d *Layout) Add(node, target *Node, position Position) bool {
 		}
 		d.root = node
 		guigui.RequestRebuild()
-		guigui.RequestRedraw(d)
+		d.requestRedraw()
 		return true
 	}
 	if target == nil {
@@ -225,7 +558,7 @@ func (d *Layout) Add(node, target *Node, position Position) bool {
 		return false
 	}
 	guigui.RequestRebuild()
-	guigui.RequestRedraw(d)
+	d.requestRedraw()
 	return true
 }
 
@@ -253,7 +586,7 @@ func (d *Layout) Remove(node *Node) bool {
 	node.group.panels = append(node.group.panels[:0], node.panels...)
 	node.group.selected = min(node.group.selected, len(node.panels)-1)
 	guigui.RequestRebuild()
-	guigui.RequestRedraw(d)
+	d.requestRedraw()
 	return true
 }
 
@@ -425,7 +758,7 @@ func (d *Layout) HandlePointingInput(context *guigui.Context, widgetBounds *guig
 	if d.dragPanel != nil || d.dragGroupNode != nil {
 		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 			d.updateDropTarget(context, cursor)
-			guigui.RequestRedraw(d)
+			d.requestRedraw()
 			return guigui.HandleInputByWidget(d)
 		}
 		d.finishDrag()
@@ -615,7 +948,7 @@ func (d *Layout) finishDrag() {
 	d.dropRect = image.Rectangle{}
 	d.dropTabGroup = nil
 	d.dropTabIndex = 0
-	guigui.RequestRedraw(d)
+	d.requestRedraw()
 }
 
 // movePanel removes panel from its source (a tree group or an edge bar) and

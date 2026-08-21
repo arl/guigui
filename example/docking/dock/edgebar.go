@@ -53,6 +53,17 @@ func newEdgeBar(side edgeSide) *edgeBar {
 	}
 }
 
+func newEdgeBarFromGroup(side edgeSide, group *group) *edgeBar {
+	if group == nil {
+		return nil
+	}
+	bar := newEdgeBar(side)
+	group.vertical = true
+	group.stripOnRight = side == edgeSideRight
+	bar.group = group
+	return bar
+}
+
 func (b *edgeBar) isOpen() bool { return b.expanded || b.pinned }
 
 func (b *edgeBar) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWriter) {
