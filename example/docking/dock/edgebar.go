@@ -1,4 +1,4 @@
-package main
+package dock
 
 import (
 	"image"
@@ -29,7 +29,7 @@ func edgeOpenWidth(u int) int { return u * 10 }
 type edgeBar struct {
 	guigui.DefaultWidget
 
-	group    *DockGroup
+	group    *group
 	side     edgeSide
 	expanded bool
 	pinned   bool
@@ -37,16 +37,16 @@ type edgeBar struct {
 	pinRect image.Rectangle
 
 	// Pending tab press, used to distinguish a click from a drag.
-	pressPanel *DockPanel
+	pressPanel *Panel
 	pressPos   image.Point
 
-	onDragStart func(panel *DockPanel, cursor image.Point)
+	onDragStart func(panel *Panel, cursor image.Point)
 }
 
 func newEdgeBar(side edgeSide) *edgeBar {
 	return &edgeBar{
 		side: side,
-		group: &DockGroup{
+		group: &group{
 			vertical:     true,
 			stripOnRight: side == edgeSideRight,
 		},
@@ -62,7 +62,7 @@ func (b *edgeBar) WriteStateKey(context *guigui.Context, w *guigui.StateKeyWrite
 
 func (b *edgeBar) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	b.group.collapsed = !b.isOpen()
-	b.group.onTabClick = func(panel *DockPanel, cursor image.Point) {
+	b.group.onTabClick = func(panel *Panel, cursor image.Point) {
 		b.pressPanel = panel
 		b.pressPos = cursor
 	}
@@ -124,7 +124,7 @@ func (b *edgeBar) togglePin() {
 }
 
 // clickTab selects the tab and expands/collapses the bar as appropriate.
-func (b *edgeBar) clickTab(panel *DockPanel) {
+func (b *edgeBar) clickTab(panel *Panel) {
 	g := b.group
 	idx := -1
 	for i, p := range g.panels {

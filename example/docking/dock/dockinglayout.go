@@ -1,4 +1,4 @@
-package main
+package dock
 
 import (
 	"image"
@@ -13,11 +13,21 @@ import (
 	"github.com/guigui-gui/guigui/basicwidget"
 )
 
-// DropEdge identifies a drop zone within a target group.
-type DropEdge int
+// Direction controls how a split arranges its child nodes.
+type Direction int
 
 const (
-	dropEdgeNone DropEdge = iota
+	// Horizontal arranges a split's children from left to right.
+	Horizontal Direction = iota
+	// Vertical arranges a split's children from top to bottom.
+	Vertical
+)
+
+// dropEdge identifies a drop zone within a target group.
+type dropEdge int
+
+const (
+	dropEdgeNone dropEdge = iota
 	dropEdgeLeft
 	dropEdgeRight
 	dropEdgeTop
@@ -25,26 +35,36 @@ const (
 	dropEdgeCenter
 )
 
-// DockNode is a node in the docking tree. Exactly one of group or split is
+// Node is a node in the docking tree. Exactly one of group or split is
 // non-nil.
-type DockNode struct {
-	group *DockGroup
-	split *DockSplit
+type Node struct {
+	group *group
+	split *split
 }
 
-// DockSplit divides its space between two child nodes, separated by a
+// Group creates a tab group containing panels.
+func Group(panels ...*Panel) *Node {
+	return &Node{group: &group{panels: panels}}
+}
+
+// Split creates a split node with the provided child nodes and ratio.
+func Split(direction Direction, ratio float64, first, second *Node) *Node {
+	return &Node{split: &split{direction: direction, ratio: ratio, first: first, second: second}}
+}
+
+// split divides its space between two child nodes, separated by a
 // draggable divider.
-type DockSplit struct {
-	direction guigui.LayoutDirection
+type split struct {
+	direction Direction
 	// ratio is the fraction of the available extent given to first, in
 	// [0, 1].
 	ratio  float64
-	first  *DockNode
-	second *DockNode
+	first  *Node
+	second *Node
 }
 
 type dockDivider struct {
-	split  *DockSplit
+	split  *split
 	bounds image.Rectangle
 	// available is the total extent along the split axis, minus the divider
 	// thickness, at the time of the last layout.
@@ -52,7 +72,7 @@ type dockDivider struct {
 }
 
 type dockGroupBounds struct {
-	node   *DockNode
+	node   *Node
 	bounds image.Rectangle
 }
 
@@ -61,7 +81,7 @@ type dockGroupBounds struct {
 type dockOverlay struct {
 	guigui.DefaultWidget
 
-	dock *DockingLayout
+	dock *Layout
 }
 
 func (o *dockOverlay) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
@@ -78,13 +98,13 @@ func (o *dockOverlay) Draw(context *guigui.Context, widgetBounds *guigui.WidgetB
 	vector.StrokeRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), 1, accent, false)
 }
 
-// DockingLayout arranges dockable panels in a nestable tree of groups (tabs)
+// Layout arranges dockable panels in a nestable tree of groups (tabs)
 // and splits. Dividers resize; dragging a tab re-docks it, either as another
 // tab (center) or as a new group split onto an edge.
-type DockingLayout struct {
+type Layout struct {
 	guigui.DefaultWidget
 
-	root    *DockNode
+	root    *Node
 	overlay dockOverlay
 
 	// left and right are the vertical sticky tab groups on the root edges.
@@ -101,19 +121,19 @@ type DockingLayout struct {
 	groupBounds []dockGroupBounds
 
 	// Divider-resize drag state.
-	dragging       *DockSplit
+	dragging       *split
 	dragOrigin     image.Point
 	dragStartRatio float64
 	dragAvailable  int
 
 	// Panel-move drag state.
-	dragPanel    *DockPanel
-	dragGroup    *DockGroup
-	sourceNode   *DockNode
-	dropNode     *DockNode
-	dropEdge     DropEdge
+	dragPanel    *Panel
+	dragGroup    *group
+	sourceNode   *Node
+	dropNode     *Node
+	dropEdge     dropEdge
 	dropRect     image.Rectangle
-	dropTabGroup *DockGroup
+	dropTabGroup *group
 	dropTabIndex int
 	// dragFromBar is the source edge bar for a panel drag (none for tree).
 	dragFromBar edgeSide
@@ -121,27 +141,27 @@ type DockingLayout struct {
 	dropBar edgeSide
 
 	// Group-move drag state. Non-nil when dragging a whole group.
-	dragGroupNode *DockNode
+	dragGroupNode *Node
 }
 
 // SetRoot sets the root of the docking tree.
-func (d *DockingLayout) SetRoot(root *DockNode) {
+func (d *Layout) SetRoot(root *Node) {
 	d.root = root
 }
 
-func (d *DockingLayout) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+func (d *Layout) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	if d.root != nil {
 		d.addNode(adder, d.root)
 	}
 	if d.left != nil {
 		adder.AddWidget(d.left)
-		d.left.onDragStart = func(panel *DockPanel, cursor image.Point) {
+		d.left.onDragStart = func(panel *Panel, cursor image.Point) {
 			d.beginDragFromBar(panel, d.left, cursor)
 		}
 	}
 	if d.right != nil {
 		adder.AddWidget(d.right)
-		d.right.onDragStart = func(panel *DockPanel, cursor image.Point) {
+		d.right.onDragStart = func(panel *Panel, cursor image.Point) {
 			d.beginDragFromBar(panel, d.right, cursor)
 		}
 	}
@@ -151,14 +171,14 @@ func (d *DockingLayout) Build(context *guigui.Context, adder *guigui.ChildAdder)
 	return nil
 }
 
-func (d *DockingLayout) addNode(adder *guigui.ChildAdder, node *DockNode) {
+func (d *Layout) addNode(adder *guigui.ChildAdder, node *Node) {
 	if node.group != nil {
 		adder.AddWidget(node.group)
-		group := node.group
-		group.onDragStart = func(panel *DockPanel, cursor image.Point) {
-			d.beginDrag(panel, group, cursor)
+		nodeGroup := node.group
+		nodeGroup.onDragStart = func(panel *Panel, cursor image.Point) {
+			d.beginDrag(panel, nodeGroup, cursor)
 		}
-		group.onGroupDragStart = func(g *DockGroup, cursor image.Point) {
+		nodeGroup.onGroupDragStart = func(g *group, cursor image.Point) {
 			d.beginGroupDrag(g, cursor)
 		}
 		return
@@ -169,7 +189,7 @@ func (d *DockingLayout) addNode(adder *guigui.ChildAdder, node *DockNode) {
 	}
 }
 
-func (d *DockingLayout) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+func (d *Layout) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	d.dividers = slices.Delete(d.dividers, 0, len(d.dividers))
 	d.groupBounds = slices.Delete(d.groupBounds, 0, len(d.groupBounds))
 	b := widgetBounds.Bounds()
@@ -208,12 +228,12 @@ func (d *DockingLayout) Layout(context *guigui.Context, widgetBounds *guigui.Wid
 	layouter.LayoutWidget(&d.overlay, b)
 }
 
-func (d *DockingLayout) dividerThickness(context *guigui.Context) int {
+func (d *Layout) dividerThickness(context *guigui.Context) int {
 	return max(6, basicwidget.UnitSize(context)/4)
 }
 
 // splitExtents computes the extents of the two children along the split axis.
-func (d *DockingLayout) splitExtents(context *guigui.Context, split *DockSplit, available int) (int, int) {
+func (d *Layout) splitExtents(context *guigui.Context, split *split, available int) (int, int) {
 	minExtent := basicwidget.UnitSize(context)
 	first := int(float64(available) * split.ratio)
 	second := available - first
@@ -226,7 +246,7 @@ func (d *DockingLayout) splitExtents(context *guigui.Context, split *DockSplit, 
 	return first, second
 }
 
-func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, bounds image.Rectangle, layouter *guigui.ChildLayouter) {
+func (d *Layout) layoutNode(context *guigui.Context, node *Node, bounds image.Rectangle, layouter *guigui.ChildLayouter) {
 	if node.group != nil {
 		layouter.LayoutWidget(node.group, bounds)
 		d.groupBounds = append(d.groupBounds, dockGroupBounds{node: node, bounds: bounds})
@@ -241,7 +261,7 @@ func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, boun
 	var first, divider, second image.Rectangle
 	var available int
 	switch split.direction {
-	case guigui.LayoutDirectionHorizontal:
+	case Horizontal:
 		available = bounds.Dx() - t
 		f, _ := d.splitExtents(context, split, available)
 		first = image.Rectangle{
@@ -256,7 +276,7 @@ func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, boun
 			Min: image.Pt(bounds.Min.X+f+t, bounds.Min.Y),
 			Max: bounds.Max,
 		}
-	case guigui.LayoutDirectionVertical:
+	case Vertical:
 		available = bounds.Dy() - t
 		f, _ := d.splitExtents(context, split, available)
 		first = image.Rectangle{
@@ -282,7 +302,7 @@ func (d *DockingLayout) layoutNode(context *guigui.Context, node *DockNode, boun
 	d.layoutNode(context, split.second, second, layouter)
 }
 
-func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+func (d *Layout) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	cursor := image.Pt(ebiten.CursorPosition())
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		for _, bar := range []*edgeBar{d.left, d.right} {
@@ -330,7 +350,7 @@ func (d *DockingLayout) HandlePointingInput(context *guigui.Context, widgetBound
 }
 
 // beginDrag starts moving panel out of group, called from a tab press.
-func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor image.Point) {
+func (d *Layout) beginDrag(panel *Panel, group *group, cursor image.Point) {
 	d.dragPanel = panel
 	d.dragGroup = group
 	d.sourceNode = findGroupNode(d.root, group)
@@ -345,7 +365,7 @@ func (d *DockingLayout) beginDrag(panel *DockPanel, group *DockGroup, cursor ima
 }
 
 // beginDragFromBar starts moving a panel out of a vertical edge bar.
-func (d *DockingLayout) beginDragFromBar(panel *DockPanel, bar *edgeBar, cursor image.Point) {
+func (d *Layout) beginDragFromBar(panel *Panel, bar *edgeBar, cursor image.Point) {
 	d.dragPanel = panel
 	d.dragGroup = bar.group
 	d.sourceNode = nil
@@ -361,7 +381,7 @@ func (d *DockingLayout) beginDragFromBar(panel *DockPanel, bar *edgeBar, cursor 
 
 // beginGroupDrag starts moving an entire group, called from an empty-tab-bar
 // press.
-func (d *DockingLayout) beginGroupDrag(group *DockGroup, cursor image.Point) {
+func (d *Layout) beginGroupDrag(group *group, cursor image.Point) {
 	d.dragGroupNode = findGroupNode(d.root, group)
 	d.dragPanel = nil
 	d.dragGroup = nil
@@ -375,7 +395,7 @@ func (d *DockingLayout) beginGroupDrag(group *DockGroup, cursor image.Point) {
 }
 
 // updateDropTarget recomputes the drop zone under the cursor.
-func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.Point) {
+func (d *Layout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 	d.dropNode = nil
 	d.dropEdge = dropEdgeNone
 	d.dropBar = edgeSideNone
@@ -457,7 +477,7 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 }
 
 // finishDrag applies the pending drop, if any, and clears the drag state.
-func (d *DockingLayout) finishDrag() {
+func (d *Layout) finishDrag() {
 	switch {
 	case d.dragGroupNode != nil:
 		if d.dropTabGroup != nil {
@@ -493,7 +513,7 @@ func (d *DockingLayout) finishDrag() {
 // movePanel removes panel from its source (a tree group or an edge bar) and
 // re-docks it: into target's group on a center drop, or as a new group split
 // next to target on an edge.
-func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, fromBar edgeSide, targetNode *DockNode, edge DropEdge) {
+func (d *Layout) movePanel(panel *Panel, source *group, fromBar edgeSide, targetNode *Node, edge dropEdge) {
 	// A tab dropped back onto its own group splits it off as a sibling group.
 	if fromBar == edgeSideNone && targetNode.group == source {
 		if len(source.panels) <= 1 {
@@ -501,9 +521,9 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, fromBar e
 			return
 		}
 		removePanelFromGroup(source, panel)
-		node := &DockNode{
-			group: &DockGroup{
-				panels:   []*DockPanel{panel},
+		node := &Node{
+			group: &group{
+				panels:   []*Panel{panel},
 				selected: 0,
 			},
 		}
@@ -520,14 +540,14 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, fromBar e
 		return
 	}
 
-	newGroup := &DockGroup{
-		panels:   []*DockPanel{panel},
+	newGroup := &group{
+		panels:   []*Panel{panel},
 		selected: 0,
 	}
-	d.root = attachNode(d.root, targetNode, &DockNode{group: newGroup}, edge)
+	d.root = attachNode(d.root, targetNode, &Node{group: newGroup}, edge)
 }
 
-func (d *DockingLayout) insertPanelAt(panel *DockPanel, source *DockGroup, fromBar edgeSide, target *DockGroup, index int) {
+func (d *Layout) insertPanelAt(panel *Panel, source *group, fromBar edgeSide, target *group, index int) {
 	if source == target {
 		oldIndex := slices.Index(source.panels, panel)
 		if oldIndex < 0 {
@@ -548,7 +568,7 @@ func (d *DockingLayout) insertPanelAt(panel *DockPanel, source *DockGroup, fromB
 	target.selected = index
 }
 
-func (d *DockingLayout) insertGroupAt(sourceNode *DockNode, target *DockGroup, index int) {
+func (d *Layout) insertGroupAt(sourceNode *Node, target *group, index int) {
 	source := sourceNode.group
 	if source == nil || source == target {
 		return
@@ -556,7 +576,7 @@ func (d *DockingLayout) insertGroupAt(sourceNode *DockNode, target *DockGroup, i
 	d.root = removeNode(d.root, sourceNode)
 
 	index = max(0, min(index, len(target.panels)))
-	panels := make([]*DockPanel, 0, len(target.panels)+len(source.panels))
+	panels := make([]*Panel, 0, len(target.panels)+len(source.panels))
 	panels = append(panels, target.panels[:index]...)
 	panels = append(panels, source.panels...)
 	panels = append(panels, target.panels[index:]...)
@@ -566,7 +586,7 @@ func (d *DockingLayout) insertGroupAt(sourceNode *DockNode, target *DockGroup, i
 
 // removePanelFromSource removes panel from its source group, and removes the
 // source from the tree or the edge bar if it became empty.
-func (d *DockingLayout) removePanelFromSource(panel *DockPanel, source *DockGroup, fromBar edgeSide) {
+func (d *Layout) removePanelFromSource(panel *Panel, source *group, fromBar edgeSide) {
 	if !removePanelFromGroup(source, panel) {
 		return
 	}
@@ -579,7 +599,7 @@ func (d *DockingLayout) removePanelFromSource(panel *DockPanel, source *DockGrou
 
 // moveGroupToBar moves an entire tree group onto a root edge, turning it into
 // a vertical sticky bar (created collapsed).
-func (d *DockingLayout) moveGroupToBar(sourceNode *DockNode, side edgeSide) {
+func (d *Layout) moveGroupToBar(sourceNode *Node, side edgeSide) {
 	if d.barFor(side) != nil {
 		return
 	}
@@ -593,7 +613,7 @@ func (d *DockingLayout) moveGroupToBar(sourceNode *DockNode, side edgeSide) {
 
 // movePanelToBar moves a single panel onto a root edge, creating a bar if
 // needed or adding the panel to the existing bar's group.
-func (d *DockingLayout) movePanelToBar(panel *DockPanel, source *DockGroup, fromBar edgeSide, side edgeSide) {
+func (d *Layout) movePanelToBar(panel *Panel, source *group, fromBar edgeSide, side edgeSide) {
 	if fromBar == side {
 		// Dropped back onto the bar it came from; nothing to do.
 		return
@@ -602,7 +622,7 @@ func (d *DockingLayout) movePanelToBar(panel *DockPanel, source *DockGroup, from
 	bar := d.barFor(side)
 	if bar == nil {
 		bar = newEdgeBar(side)
-		bar.group.panels = []*DockPanel{panel}
+		bar.group.panels = []*Panel{panel}
 		bar.group.selected = 0
 		d.setBar(side, bar)
 		return
@@ -612,7 +632,7 @@ func (d *DockingLayout) movePanelToBar(panel *DockPanel, source *DockGroup, from
 }
 
 // barFor returns the edge bar for side, or nil.
-func (d *DockingLayout) barFor(side edgeSide) *edgeBar {
+func (d *Layout) barFor(side edgeSide) *edgeBar {
 	switch side {
 	case edgeSideLeft:
 		return d.left
@@ -625,7 +645,7 @@ func (d *DockingLayout) barFor(side edgeSide) *edgeBar {
 // edgeBarDropRect returns the drop-preview area for an edge: the empty
 // remainder of the vertical strip below the existing tabs, or the whole strip
 // when no bar exists yet. It returns an empty rectangle when there is no room.
-func (d *DockingLayout) edgeBarDropRect(context *guigui.Context, side edgeSide) image.Rectangle {
+func (d *Layout) edgeBarDropRect(context *guigui.Context, side edgeSide) image.Rectangle {
 	u := basicwidget.UnitSize(context)
 	var zone image.Rectangle
 	var bar *edgeBar
@@ -654,7 +674,7 @@ func (d *DockingLayout) edgeBarDropRect(context *guigui.Context, side edgeSide) 
 }
 
 // setBar sets the edge bar for side (nil removes it).
-func (d *DockingLayout) setBar(side edgeSide, bar *edgeBar) {
+func (d *Layout) setBar(side edgeSide, bar *edgeBar) {
 	switch side {
 	case edgeSideLeft:
 		d.left = bar
@@ -665,7 +685,7 @@ func (d *DockingLayout) setBar(side edgeSide, bar *edgeBar) {
 
 // moveGroup re-docks an entire group (keeping its tabs intact) as a sibling
 // of targetNode, split onto edge. The source node keeps its identity.
-func (d *DockingLayout) moveGroup(sourceNode, targetNode *DockNode, edge DropEdge) {
+func (d *Layout) moveGroup(sourceNode, targetNode *Node, edge dropEdge) {
 	if edge == dropEdgeCenter {
 		source := sourceNode.group
 		target := targetNode.group
@@ -683,7 +703,7 @@ func (d *DockingLayout) moveGroup(sourceNode, targetNode *DockNode, edge DropEdg
 
 // removePanelFromGroup removes panel from group, fixing the selection. It
 // reports whether the group is now empty.
-func removePanelFromGroup(group *DockGroup, panel *DockPanel) bool {
+func removePanelFromGroup(group *group, panel *Panel) bool {
 	for i, p := range group.panels {
 		if p == panel {
 			group.panels = append(group.panels[:i], group.panels[i+1:]...)
@@ -697,7 +717,7 @@ func removePanelFromGroup(group *DockGroup, panel *DockPanel) bool {
 }
 
 // findGroupNode returns the node whose group is group, or nil.
-func findGroupNode(node *DockNode, group *DockGroup) *DockNode {
+func findGroupNode(node *Node, group *group) *Node {
 	if node == nil {
 		return nil
 	}
@@ -717,7 +737,7 @@ func findGroupNode(node *DockNode, group *DockGroup) *DockNode {
 
 // removeNode returns node's subtree with the target node removed, collapsing
 // the split that directly contained it so the sibling keeps its own identity.
-func removeNode(node, target *DockNode) *DockNode {
+func removeNode(node, target *Node) *Node {
 	if node == target {
 		return nil
 	}
@@ -737,10 +757,10 @@ func removeNode(node, target *DockNode) *DockNode {
 
 // attachNode replaces target with a new split holding target and newNode,
 // ordered by edge. Returns the new root.
-func attachNode(root, target, newNode *DockNode, edge DropEdge) *DockNode {
+func attachNode(root, target, newNode *Node, edge dropEdge) *Node {
 	direction, newNodeFirst := splitForEdge(edge)
-	newSplit := &DockNode{
-		split: &DockSplit{
+	newSplit := &Node{
+		split: &split{
 			direction: direction,
 			ratio:     0.5,
 		},
@@ -761,21 +781,21 @@ func attachNode(root, target, newNode *DockNode, edge DropEdge) *DockNode {
 
 // splitForEdge returns the split direction for an edge drop and whether the
 // new node should be the split's first child.
-func splitForEdge(edge DropEdge) (guigui.LayoutDirection, bool) {
+func splitForEdge(edge dropEdge) (Direction, bool) {
 	switch edge {
 	case dropEdgeLeft:
-		return guigui.LayoutDirectionHorizontal, true
+		return Horizontal, true
 	case dropEdgeRight:
-		return guigui.LayoutDirectionHorizontal, false
+		return Horizontal, false
 	case dropEdgeTop:
-		return guigui.LayoutDirectionVertical, true
+		return Vertical, true
 	case dropEdgeBottom:
-		return guigui.LayoutDirectionVertical, false
+		return Vertical, false
 	}
-	return guigui.LayoutDirectionHorizontal, false
+	return Horizontal, false
 }
 
-func replaceNode(node, target, replacement *DockNode) {
+func replaceNode(node, target, replacement *Node) {
 	if node.split == nil {
 		return
 	}
@@ -794,7 +814,7 @@ func replaceNode(node, target, replacement *DockNode) {
 // dropEdgeAt returns the drop zone the cursor falls in within bounds. Dropping
 // on the tab bar (the top strip) tabs the panel into the group; the outer
 // thirds are the four edge-split targets; the rest is the center.
-func (d *DockingLayout) dropEdgeAt(context *guigui.Context, cursor image.Point, b image.Rectangle) DropEdge {
+func (d *Layout) dropEdgeAt(context *guigui.Context, cursor image.Point, b image.Rectangle) dropEdge {
 	u := basicwidget.UnitSize(context)
 	if cursor.Y < b.Min.Y+u {
 		return dropEdgeCenter
@@ -815,7 +835,7 @@ func (d *DockingLayout) dropEdgeAt(context *guigui.Context, cursor image.Point, 
 	}
 }
 
-func (d *DockingLayout) dropRectFor(context *guigui.Context, cursor image.Point, b image.Rectangle, edge DropEdge, group *DockGroup) image.Rectangle {
+func (d *Layout) dropRectFor(context *guigui.Context, cursor image.Point, b image.Rectangle, edge dropEdge, group *group) image.Rectangle {
 	u := basicwidget.UnitSize(context)
 	edgeX := b.Dx() / 3
 	edgeY := b.Dy() / 3
@@ -846,22 +866,22 @@ func (d *DockingLayout) dropRectFor(context *guigui.Context, cursor image.Point,
 	return image.Rectangle{}
 }
 
-func (d *DockingLayout) updateRatio(cursor image.Point) {
+func (d *Layout) updateRatio(cursor image.Point) {
 	if d.dragging == nil || d.dragAvailable <= 0 {
 		return
 	}
 	var delta int
 	switch d.dragging.direction {
-	case guigui.LayoutDirectionHorizontal:
+	case Horizontal:
 		delta = cursor.X - d.dragOrigin.X
-	case guigui.LayoutDirectionVertical:
+	case Vertical:
 		delta = cursor.Y - d.dragOrigin.Y
 	}
 	ratio := d.dragStartRatio + float64(delta)/float64(d.dragAvailable)
 	d.dragging.ratio = min(max(ratio, 0.1), 0.9)
 }
 
-func (d *DockingLayout) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
+func (d *Layout) CursorShape(context *guigui.Context, widgetBounds *guigui.WidgetBounds) (ebiten.CursorShapeType, bool) {
 	if d.dragPanel != nil || d.dragGroupNode != nil {
 		return 0, false
 	}
@@ -877,14 +897,14 @@ func (d *DockingLayout) CursorShape(context *guigui.Context, widgetBounds *guigu
 	return 0, false
 }
 
-func resizeCursorFor(direction guigui.LayoutDirection) ebiten.CursorShapeType {
-	if direction == guigui.LayoutDirectionHorizontal {
+func resizeCursorFor(direction Direction) ebiten.CursorShapeType {
+	if direction == Horizontal {
 		return ebiten.CursorShapeEWResize
 	}
 	return ebiten.CursorShapeNSResize
 }
 
-func (d *DockingLayout) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+func (d *Layout) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	var clr color.RGBA
 	if context.ColorMode() == ebiten.ColorModeLight {
 		clr = color.RGBA{0x80, 0x80, 0x80, 0xff}

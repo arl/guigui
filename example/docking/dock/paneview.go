@@ -1,4 +1,4 @@
-package main
+package dock
 
 import (
 	"image"
@@ -137,6 +137,9 @@ type PaneView struct {
 }
 
 func paneHeaderHeight(u int) int { return max(24, u*3/4) }
+
+// Len returns the number of panes in the view.
+func (pv *PaneView) Len() int { return len(pv.panes) }
 
 // AddPane appends a pane at the end.
 func (pv *PaneView) AddPane(pane *Pane) {
