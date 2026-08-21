@@ -7,24 +7,15 @@ import (
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/guigui-gui/guigui/example/docking/dock"
 )
-
-// newPanel builds a DockPanel for the given title and content.
-func newPanel(title string, content guigui.Widget) *DockPanel {
-	return &DockPanel{Title: title, Content: content}
-}
-
-// newGroupNode builds a leaf group node holding the given panels as tabs.
-func newGroupNode(panels ...*DockPanel) *DockNode {
-	return &DockNode{group: &DockGroup{panels: panels, selected: 0}}
-}
 
 // Root hosts the docking layout that the example showcases.
 type Root struct {
 	guigui.DefaultWidget
 
 	background basicwidget.Background
-	dock       DockingLayout
+	dock       dock.Layout
 
 	editor     editorPanel
 	form       formPanel
@@ -50,7 +41,7 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 type paneViewPanel struct {
 	guigui.DefaultWidget
 
-	paneView PaneView
+	paneView dock.PaneView
 
 	pane1 basicwidget.TextInput
 	pane2 basicwidget.TextInput
@@ -70,10 +61,10 @@ func (p *paneViewPanel) Build(context *guigui.Context, adder *guigui.ChildAdder)
 	p.pane3.SetWrapMode(basicwidget.WrapModeNormal)
 	p.pane3.SetPlaceholder("Pane 3 content…")
 
-	if len(p.paneView.panes) == 0 {
-		p.paneView.AddPane(NewPane("First", &p.pane1))
-		p.paneView.AddPane(NewPane("Second", &p.pane2))
-		p.paneView.AddPane(NewPane("Third", &p.pane3))
+	if p.paneView.Len() == 0 {
+		p.paneView.AddPane(dock.NewPane("First", &p.pane1))
+		p.paneView.AddPane(dock.NewPane("Second", &p.pane2))
+		p.paneView.AddPane(dock.NewPane("Third", &p.pane3))
 	}
 	return nil
 }
@@ -313,28 +304,22 @@ func main() {
 
 	// A vertical split: a tab group (Form | Properties) beside the editor on
 	// top, and the console docked at the bottom.
-	root.dock.SetRoot(&DockNode{
-		split: &DockSplit{
-			direction: guigui.LayoutDirectionVertical,
-			ratio:     0.7,
-			first: &DockNode{
-				split: &DockSplit{
-					direction: guigui.LayoutDirectionHorizontal,
-					ratio:     0.35,
-					first: newGroupNode(
-						newPanel("Form", &root.form),
-						newPanel("Properties", &root.properties),
-					),
-					second: newGroupNode(newPanel("Editor", &root.editor)),
-				},
-			},
-			second: newGroupNode(
-				newPanel("Console", &root.console),
-				newPanel("PaneView", &root.paneview),
-				newPanel("Settings", &root.settings),
+	root.dock.SetRoot(dock.Split(
+		dock.Vertical, 0.7,
+		dock.Split(
+			dock.Horizontal, 0.35,
+			dock.Group(
+				&dock.Panel{Title: "Form", Content: &root.form},
+				&dock.Panel{Title: "Properties", Content: &root.properties},
 			),
-		},
-	})
+			dock.Group(&dock.Panel{Title: "Editor", Content: &root.editor}),
+		),
+		dock.Group(
+			&dock.Panel{Title: "Console", Content: &root.console},
+			&dock.Panel{Title: "PaneView", Content: &root.paneview},
+			&dock.Panel{Title: "Settings", Content: &root.settings},
+		),
+	))
 
 	if err := guigui.Run(root, &guigui.RunOptions{
 		Title:      "Docking",
