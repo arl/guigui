@@ -79,11 +79,10 @@ func (b *edgeBar) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBou
 
 	// Reserve the top stripWidth of the strip for the pin toggle.
 	stripTop := bnds.Min.Y + u
-	sw := stripWidth(u)
 	if b.side == edgeSideLeft {
-		b.pinRect = image.Rectangle{Min: bnds.Min, Max: image.Pt(bnds.Min.X+sw, stripTop)}
+		b.pinRect = image.Rectangle{Min: bnds.Min, Max: image.Pt(bnds.Min.X+u, stripTop)}
 	} else {
-		b.pinRect = image.Rectangle{Min: image.Pt(bnds.Max.X-sw, bnds.Min.Y), Max: image.Pt(bnds.Max.X, stripTop)}
+		b.pinRect = image.Rectangle{Min: image.Pt(bnds.Max.X-u, bnds.Min.Y), Max: image.Pt(bnds.Max.X, stripTop)}
 	}
 
 	groupBounds := image.Rectangle{Min: image.Pt(bnds.Min.X, stripTop), Max: bnds.Max}
@@ -178,7 +177,6 @@ func (b *edgeBar) CursorShape(context *guigui.Context, widgetBounds *guigui.Widg
 func (b *edgeBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	u := basicwidget.UnitSize(context)
 	bnds := widgetBounds.Bounds()
-	sw := stripWidth(u)
 
 	var bg color.RGBA
 	if context.ColorMode() == ebiten.ColorModeLight {
@@ -187,9 +185,9 @@ func (b *edgeBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBound
 		bg = color.RGBA{0x23, 0x26, 0x2a, 0xff}
 	}
 	if b.side == edgeSideLeft {
-		vector.FillRect(dst, float32(bnds.Min.X), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
+		vector.FillRect(dst, float32(bnds.Min.X), float32(bnds.Min.Y), float32(u), float32(bnds.Dy()), bg, false)
 	} else {
-		vector.FillRect(dst, float32(bnds.Max.X-sw), float32(bnds.Min.Y), float32(sw), float32(bnds.Dy()), bg, false)
+		vector.FillRect(dst, float32(bnds.Max.X-u), float32(bnds.Min.Y), float32(u), float32(bnds.Dy()), bg, false)
 	}
 
 	// Pin toggle: filled when pinned, hollow otherwise.
@@ -203,7 +201,7 @@ func (b *edgeBar) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBound
 	cx := float32(pr.Min.X + pr.Dx()/2)
 	cy := float32(pr.Min.Y + pr.Dy()/2)
 	r := float32(u / 4)
-	vector.DrawFilledCircle(dst, cx, cy, r, pin, true)
+	vector.FillCircle(dst, cx, cy, r, pin, true)
 	vector.StrokeCircle(dst, cx, cy, r, 1, color.RGBA{0, 0, 0, 0x66}, false)
 }
 

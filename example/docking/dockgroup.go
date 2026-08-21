@@ -58,9 +58,6 @@ type DockGroup struct {
 	tabBar      image.Rectangle
 }
 
-// stripWidth is the width of a vertical tab strip.
-func stripWidth(u int) int { return u * 2 }
-
 // pressTab selects panel and starts a drag of it.
 func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
 	for i, p := range g.panels {
@@ -112,14 +109,13 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	b := widgetBounds.Bounds()
 
 	if g.vertical {
-		sw := stripWidth(u)
 		var strip, content image.Rectangle
 		if g.stripOnRight {
-			strip = image.Rectangle{Min: image.Pt(b.Max.X-sw, b.Min.Y), Max: b.Max}
-			content = image.Rectangle{Min: b.Min, Max: image.Pt(b.Max.X-sw, b.Max.Y)}
+			strip = image.Rectangle{Min: image.Pt(b.Max.X-u, b.Min.Y), Max: b.Max}
+			content = image.Rectangle{Min: b.Min, Max: image.Pt(b.Max.X-u, b.Max.Y)}
 		} else {
-			strip = image.Rectangle{Min: b.Min, Max: image.Pt(b.Min.X+sw, b.Max.Y)}
-			content = image.Rectangle{Min: image.Pt(b.Min.X+sw, b.Min.Y), Max: b.Max}
+			strip = image.Rectangle{Min: b.Min, Max: image.Pt(b.Min.X+u, b.Max.Y)}
+			content = image.Rectangle{Min: image.Pt(b.Min.X+u, b.Min.Y), Max: b.Max}
 		}
 
 		g.layoutItems = slices.Delete(g.layoutItems, 0, len(g.layoutItems))
@@ -245,16 +241,15 @@ func (g *DockGroup) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 	}
 	if g.vertical {
 		if g.stripOnRight {
-			vector.FillRect(dst, float32(b.Max.X-stripWidth(u)), float32(b.Min.Y), float32(stripWidth(u)), float32(b.Dy()), rail, false)
+			vector.FillRect(dst, float32(b.Max.X-u), float32(b.Min.Y), float32(u), float32(b.Dy()), rail, false)
 		} else {
-			vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(stripWidth(u)), float32(b.Dy()), rail, false)
+			vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(u), float32(b.Dy()), rail, false)
 		}
 		// Separator between the vertical strip and the content.
-		sw := stripWidth(u)
 		if g.stripOnRight {
-			vector.StrokeLine(dst, float32(b.Max.X-sw), float32(b.Min.Y), float32(b.Max.X-sw), float32(b.Max.Y), 1, clr, false)
+			vector.StrokeLine(dst, float32(b.Max.X-u), float32(b.Min.Y), float32(b.Max.X-u), float32(b.Max.Y), 1, clr, false)
 		} else {
-			vector.StrokeLine(dst, float32(b.Min.X+sw), float32(b.Min.Y), float32(b.Min.X+sw), float32(b.Max.Y), 1, clr, false)
+			vector.StrokeLine(dst, float32(b.Min.X+u), float32(b.Min.Y), float32(b.Min.X+u), float32(b.Max.Y), 1, clr, false)
 		}
 		return
 	}

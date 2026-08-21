@@ -179,12 +179,11 @@ func (d *DockingLayout) Layout(context *guigui.Context, widgetBounds *guigui.Wid
 	d.rootBounds = b
 
 	u := basicwidget.UnitSize(context)
-	sw := stripWidth(u)
 	mainBounds := b
 
-	d.leftZone = image.Rectangle{Min: image.Pt(b.Min.X, b.Min.Y), Max: image.Pt(b.Min.X+sw, b.Max.Y)}
+	d.leftZone = image.Rectangle{Min: image.Pt(b.Min.X, b.Min.Y), Max: image.Pt(b.Min.X+u, b.Max.Y)}
 	if d.left != nil {
-		w := sw
+		w := u
 		if d.left.isOpen() {
 			w = edgeOpenWidth(u)
 		}
@@ -194,9 +193,9 @@ func (d *DockingLayout) Layout(context *guigui.Context, widgetBounds *guigui.Wid
 		mainBounds.Min.X += w
 	}
 
-	d.rightZone = image.Rectangle{Min: image.Pt(b.Max.X-sw, b.Min.Y), Max: b.Max}
+	d.rightZone = image.Rectangle{Min: image.Pt(b.Max.X-u, b.Min.Y), Max: b.Max}
 	if d.right != nil {
-		w := sw
+		w := u
 		if d.right.isOpen() {
 			w = edgeOpenWidth(u)
 		}
@@ -627,7 +626,6 @@ func (d *DockingLayout) barFor(side edgeSide) *edgeBar {
 // when no bar exists yet. It returns an empty rectangle when there is no room.
 func (d *DockingLayout) edgeBarDropRect(context *guigui.Context, side edgeSide) image.Rectangle {
 	u := basicwidget.UnitSize(context)
-	sw := stripWidth(u)
 	var zone image.Rectangle
 	var bar *edgeBar
 	if side == edgeSideLeft {
@@ -640,9 +638,9 @@ func (d *DockingLayout) edgeBarDropRect(context *guigui.Context, side edgeSide) 
 	}
 	var strip image.Rectangle
 	if side == edgeSideLeft {
-		strip = image.Rectangle{Min: zone.Min, Max: image.Pt(zone.Min.X+sw, zone.Max.Y)}
+		strip = image.Rectangle{Min: zone.Min, Max: image.Pt(zone.Min.X+u, zone.Max.Y)}
 	} else {
-		strip = image.Rectangle{Min: image.Pt(zone.Max.X-sw, zone.Min.Y), Max: zone.Max}
+		strip = image.Rectangle{Min: image.Pt(zone.Max.X-u, zone.Min.Y), Max: zone.Max}
 	}
 	used := bar.group.tabBarUsedY
 	if used < strip.Min.Y {
