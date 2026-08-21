@@ -23,6 +23,17 @@ const (
 	Vertical
 )
 
+// Position identifies where a node is added relative to another node.
+type Position int
+
+const (
+	Left Position = iota
+	Right
+	Top
+	Bottom
+	Center
+)
+
 // dropEdge identifies a drop zone within a target group.
 type dropEdge int
 
@@ -38,13 +49,15 @@ const (
 // Node is a node in the docking tree. Exactly one of group or split is
 // non-nil.
 type Node struct {
-	group *group
-	split *split
+	group  *group
+	split  *split
+	panels []*Panel
 }
 
 // Group creates a tab group containing panels.
 func Group(panels ...*Panel) *Node {
-	return &Node{group: &group{panels: panels}}
+	panels = append([]*Panel(nil), panels...)
+	return &Node{group: &group{panels: append([]*Panel(nil), panels...)}, panels: panels}
 }
 
 // Split creates a split node with the provided child nodes and ratio.
@@ -147,6 +160,101 @@ type Layout struct {
 // SetRoot sets the root of the docking tree.
 func (d *Layout) SetRoot(root *Node) {
 	d.root = root
+}
+
+// Contains reports whether node currently contributes panels to the layout.
+func (d *Layout) Contains(node *Node) bool {
+	return node != nil && len(node.panels) > 0 && d.panelsPresent(node.panels)
+}
+
+// Add adds node next to target at position. Center adds node's panels as tabs
+// in target's current group. When the layout is empty, target may be nil and
+// node becomes the root. It returns false when node is already present or the
+// target is absent.
+func (d *Layout) Add(node, target *Node, position Position) bool {
+	if node == nil || node.group == nil || len(node.panels) == 0 || d.Contains(node) {
+		return false
+	}
+	node.group.panels = append(node.group.panels[:0], node.panels...)
+	node.group.selected = min(node.group.selected, len(node.panels)-1)
+	if d.root == nil {
+		if target != nil {
+			return false
+		}
+		d.root = node
+		guigui.RequestRebuild()
+		guigui.RequestRedraw(d)
+		return true
+	}
+	if target == nil {
+		return false
+	}
+	targetGroup := d.groupContainingPanels(target.panels)
+	if targetGroup == nil {
+		return false
+	}
+	switch position {
+	case Center:
+		targetGroup.panels = append(targetGroup.panels, node.panels...)
+		targetGroup.selected = len(targetGroup.panels) - 1
+	case Left:
+		targetNode := nodeContainingPanels(d.root, target.panels)
+		if targetNode == nil {
+			return false
+		}
+		d.root = attachNode(d.root, targetNode, node, dropEdgeLeft)
+	case Right:
+		targetNode := nodeContainingPanels(d.root, target.panels)
+		if targetNode == nil {
+			return false
+		}
+		d.root = attachNode(d.root, targetNode, node, dropEdgeRight)
+	case Top:
+		targetNode := nodeContainingPanels(d.root, target.panels)
+		if targetNode == nil {
+			return false
+		}
+		d.root = attachNode(d.root, targetNode, node, dropEdgeTop)
+	case Bottom:
+		targetNode := nodeContainingPanels(d.root, target.panels)
+		if targetNode == nil {
+			return false
+		}
+		d.root = attachNode(d.root, targetNode, node, dropEdgeBottom)
+	default:
+		return false
+	}
+	guigui.RequestRebuild()
+	guigui.RequestRedraw(d)
+	return true
+}
+
+// Remove removes node's panels from the layout. It returns false when node is
+// absent. The node remains reusable with a later [Layout.Add] call.
+func (d *Layout) Remove(node *Node) bool {
+	if node == nil || len(node.panels) == 0 || !d.Contains(node) {
+		return false
+	}
+	d.root = removePanels(d.root, node.panels)
+	for _, side := range []edgeSide{edgeSideLeft, edgeSideRight} {
+		bar := d.barFor(side)
+		if bar == nil {
+			continue
+		}
+		bar.group.panels = slices.DeleteFunc(bar.group.panels, func(panel *Panel) bool {
+			return slices.Contains(node.panels, panel)
+		})
+		if len(bar.group.panels) == 0 {
+			d.setBar(side, nil)
+		} else {
+			bar.group.selected = min(bar.group.selected, len(bar.group.panels)-1)
+		}
+	}
+	node.group.panels = append(node.group.panels[:0], node.panels...)
+	node.group.selected = min(node.group.selected, len(node.panels)-1)
+	guigui.RequestRebuild()
+	guigui.RequestRedraw(d)
+	return true
 }
 
 func (d *Layout) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
@@ -733,6 +841,116 @@ func findGroupNode(node *Node, group *group) *Node {
 		}
 	}
 	return nil
+}
+
+func nodeContainingPanels(node *Node, panels []*Panel) *Node {
+	if node == nil {
+		return nil
+	}
+	if node.group != nil && groupContainsPanels(node.group, panels) {
+		return node
+	}
+	if node.split != nil {
+		if n := nodeContainingPanels(node.split.first, panels); n != nil {
+			return n
+		}
+		return nodeContainingPanels(node.split.second, panels)
+	}
+	return nil
+}
+
+func groupContainingPanels(node *Node, panels []*Panel) *group {
+	if n := nodeContainingPanels(node, panels); n != nil {
+		return n.group
+	}
+	return nil
+}
+
+func (d *Layout) panelsPresent(panels []*Panel) bool {
+	if nodeContainsAnyPanels(d.root, panels) {
+		return true
+	}
+	for _, bar := range []*edgeBar{d.left, d.right} {
+		if bar != nil && groupContainsAnyPanels(bar.group, panels) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeContainsAnyPanels(node *Node, panels []*Panel) bool {
+	if node == nil {
+		return false
+	}
+	if node.group != nil {
+		return groupContainsAnyPanels(node.group, panels)
+	}
+	return node.split != nil && (nodeContainsAnyPanels(node.split.first, panels) || nodeContainsAnyPanels(node.split.second, panels))
+}
+
+func (d *Layout) groupContainingPanels(panels []*Panel) *group {
+	if target := groupContainingPanels(d.root, panels); target != nil {
+		return target
+	}
+	for _, bar := range []*edgeBar{d.left, d.right} {
+		if bar != nil && groupContainsPanels(bar.group, panels) {
+			return bar.group
+		}
+	}
+	return nil
+}
+
+func groupContainsPanels(group *group, panels []*Panel) bool {
+	if group == nil || len(panels) == 0 {
+		return false
+	}
+	for _, panel := range panels {
+		if !slices.Contains(group.panels, panel) {
+			return false
+		}
+	}
+	return true
+}
+
+func groupContainsAnyPanels(group *group, panels []*Panel) bool {
+	if group == nil {
+		return false
+	}
+	for _, panel := range panels {
+		if slices.Contains(group.panels, panel) {
+			return true
+		}
+	}
+	return false
+}
+
+func removePanels(node *Node, panels []*Panel) *Node {
+	if node == nil {
+		return nil
+	}
+	if node.group != nil {
+		node.group.panels = slices.DeleteFunc(node.group.panels, func(panel *Panel) bool {
+			return slices.Contains(panels, panel)
+		})
+		if len(node.group.panels) == 0 {
+			return nil
+		}
+		node.group.selected = min(node.group.selected, len(node.group.panels)-1)
+		return node
+	}
+	if node.split == nil {
+		return node
+	}
+	node.split.first = removePanels(node.split.first, panels)
+	node.split.second = removePanels(node.split.second, panels)
+	switch {
+	case node.split.first == nil:
+		return node.split.second
+	case node.split.second == nil:
+		return node.split.first
+	default:
+		return node
+	}
 }
 
 // removeNode returns node's subtree with the target node removed, collapsing
