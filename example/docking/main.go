@@ -16,7 +16,7 @@ type Root struct {
 
 	background basicwidget.Background
 	menubar    basicwidget.Menubar[string]
-	dock       dock.Layout
+	dock       *dock.Root
 
 	editor     editorPanel
 	form       formPanel
@@ -35,7 +35,7 @@ type Root struct {
 func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	adder.AddWidget(&r.background)
 	adder.AddWidget(&r.menubar)
-	adder.AddWidget(&r.dock)
+	adder.AddWidget(r.dock)
 
 	nodes := []struct {
 		text string
@@ -47,19 +47,54 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 		{text: "PaneView", node: r.paneViewNode},
 		{text: "Settings", node: r.settingsNode},
 	}
-	r.menubar.SetItems([]basicwidget.MenubarItem{{Text: "Panels"}})
-	menuItems := make([]basicwidget.PopupMenuItem[string], 0, len(nodes))
+	r.menubar.SetItems([]basicwidget.MenubarItem{{Text: "Panels"}, {Text: "File"}})
+	panelsMenuItems := make([]basicwidget.PopupMenuItem[string], 0, len(nodes))
 	for _, item := range nodes {
-		menuItems = append(menuItems, basicwidget.PopupMenuItem[string]{
+		panelsMenuItems = append(panelsMenuItems, basicwidget.PopupMenuItem[string]{
 			Text:    item.text,
 			Checked: r.dock.Contains(item.node),
 			Value:   item.text,
 		})
 	}
-	r.menubar.PopupMenuAt(0).SetItems(menuItems)
+	const (
+		idxPanels = iota
+		idxFile
+	)
+
+	r.menubar.PopupMenuAt(idxPanels).SetItems(panelsMenuItems)
+	r.menubar.PopupMenuAt(idxFile).SetItems([]basicwidget.PopupMenuItem[string]{
+		{Text: "Load", Value: "load"},
+		{Text: "Save", Value: "save"},
+	})
+
 	r.menubar.OnItemSelected(func(context *guigui.Context, menuIndex, itemIndex int) {
-		if menuIndex == 0 && itemIndex >= 0 && itemIndex < len(nodes) {
-			r.toggleNode(nodes[itemIndex].node)
+		switch menuIndex {
+		case idxPanels:
+			if itemIndex >= 0 && itemIndex < len(nodes) {
+				r.toggleNode(nodes[itemIndex].node)
+			}
+		case idxFile:
+			switch itemIndex {
+			case 0: // load
+				buf, err := os.ReadFile("dock.json")
+				if err != nil {
+					panic(err)
+				}
+				if err := r.dock.ApplyJSON(buf); err != nil {
+					panic(err)
+				}
+				fmt.Println("loaded dock.json")
+
+			case 1: // save
+				buf, err := r.dock.MarshalJSON()
+				if err != nil {
+					panic(err)
+				}
+				if err := os.WriteFile("dock.json", buf, 0o744); err != nil {
+					panic(err)
+				}
+				fmt.Println("saved dock.json")
+			}
 		}
 	})
 	return nil
@@ -71,7 +106,7 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 	menuHeight := r.menubar.Measure(context, guigui.Constraints{}).Y
 	menuBounds := image.Rect(b.Min.X, b.Min.Y, b.Max.X, b.Min.Y+menuHeight)
 	layouter.LayoutWidget(&r.menubar, menuBounds)
-	layouter.LayoutWidget(&r.dock, image.Rect(b.Min.X, menuBounds.Max.Y, b.Max.X, b.Max.Y))
+	layouter.LayoutWidget(r.dock, image.Rect(b.Min.X, menuBounds.Max.Y, b.Max.X, b.Max.Y))
 }
 
 func (r *Root) toggleNode(node *dock.Node) {
@@ -353,17 +388,18 @@ func (c *consolePanel) Layout(context *guigui.Context, widgetBounds *guigui.Widg
 func main() {
 	root := &Root{}
 	root.formNode = dock.Group(
+		"form-properties",
 		&dock.Panel{Title: "Form", Content: &root.form},
 		&dock.Panel{Title: "Properties", Content: &root.properties},
 	)
-	root.editorNode = dock.Group(&dock.Panel{Title: "Editor", Content: &root.editor})
-	root.consoleNode = dock.Group(&dock.Panel{Title: "Console", Content: &root.console})
-	root.paneViewNode = dock.Group(&dock.Panel{Title: "PaneView", Content: &root.paneview})
-	root.settingsNode = dock.Group(&dock.Panel{Title: "Settings", Content: &root.settings})
+	root.editorNode = dock.Group("editor", &dock.Panel{Title: "Editor", Content: &root.editor})
+	root.consoleNode = dock.Group("console", &dock.Panel{Title: "Console", Content: &root.console})
+	root.paneViewNode = dock.Group("pane-view", &dock.Panel{Title: "PaneView", Content: &root.paneview})
+	root.settingsNode = dock.Group("settings", &dock.Panel{Title: "Settings", Content: &root.settings})
 
 	// A vertical split: a tab group (Form | Properties) beside the editor on
 	// top, and the console docked at the bottom.
-	root.dock.SetRoot(dock.Split(
+	initialLayout := dock.Split(
 		dock.Vertical, 0.7,
 		dock.Split(
 			dock.Horizontal, 0.35,
@@ -375,7 +411,13 @@ func main() {
 			root.paneViewNode,
 			root.settingsNode,
 		),
-	))
+	)
+	var err error
+	root.dock, err = dock.NewRoot(initialLayout, root.consoleNode)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return
+	}
 
 	if err := guigui.Run(root, &guigui.RunOptions{
 		Title:      "Docking",
