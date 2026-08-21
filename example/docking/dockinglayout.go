@@ -441,9 +441,9 @@ func (d *DockingLayout) updateDropTarget(context *guigui.Context, cursor image.P
 			continue
 		}
 		if groupDrag {
-			// Group drags can't drop on themselves; center drops are disallowed
-			// (groups stay intact, only split onto edges).
-			if gb.node == d.dragGroupNode || edge == dropEdgeCenter {
+			// Group drags cannot drop onto themselves, but can merge into another
+			// group's center target.
+			if gb.node == d.dragGroupNode {
 				continue
 			}
 		} else {
@@ -667,6 +667,17 @@ func (d *DockingLayout) setBar(side edgeSide, bar *edgeBar) {
 // moveGroup re-docks an entire group (keeping its tabs intact) as a sibling
 // of targetNode, split onto edge. The source node keeps its identity.
 func (d *DockingLayout) moveGroup(sourceNode, targetNode *DockNode, edge DropEdge) {
+	if edge == dropEdgeCenter {
+		source := sourceNode.group
+		target := targetNode.group
+		if source == nil || target == nil || source == target {
+			return
+		}
+		d.root = removeNode(d.root, sourceNode)
+		target.panels = append(target.panels, source.panels...)
+		target.selected = len(target.panels) - 1
+		return
+	}
 	d.root = removeNode(d.root, sourceNode)
 	d.root = attachNode(d.root, targetNode, sourceNode, edge)
 }
