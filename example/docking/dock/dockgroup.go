@@ -1,4 +1,4 @@
-package main
+package dock
 
 import (
 	"image"
@@ -15,25 +15,25 @@ import (
 	"github.com/guigui-gui/guigui/basicwidget"
 )
 
-// DockGroup is a leaf in the docking tree that holds one or more panels shown
+// group is a leaf in the docking tree that holds one or more panels shown
 // as tabs. The selected panel's content is displayed below the tab bar.
-type DockGroup struct {
+type group struct {
 	guigui.DefaultWidget
 
-	panels   []*DockPanel
+	panels   []*Panel
 	selected int
 
-	// onDragStart is wired by the DockingLayout to begin moving a panel whose
+	// onDragStart is wired by Layout to begin moving a panel whose
 	// tab was pressed.
-	onDragStart func(panel *DockPanel, cursor image.Point)
+	onDragStart func(panel *Panel, cursor image.Point)
 
-	// onGroupDragStart is wired by the DockingLayout to begin moving the whole
+	// onGroupDragStart is wired by Layout to begin moving the whole
 	// group, called when the empty part of the tab bar is pressed.
-	onGroupDragStart func(group *DockGroup, cursor image.Point)
+	onGroupDragStart func(group *group, cursor image.Point)
 
 	// onTabClick, when set, overrides pressTab for tab presses. Used by edge
 	// bars to implement expand/collapse/select instead of a drag.
-	onTabClick func(panel *DockPanel, cursor image.Point)
+	onTabClick func(panel *Panel, cursor image.Point)
 
 	// vertical renders the tab strip on a side instead of across the top.
 	vertical     bool
@@ -56,7 +56,7 @@ type DockGroup struct {
 }
 
 // pressTab selects panel and starts a drag of it.
-func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
+func (g *group) pressTab(panel *Panel, cursor image.Point) {
 	for i, p := range g.panels {
 		if p == panel {
 			g.selected = i
@@ -70,7 +70,7 @@ func (g *DockGroup) pressTab(panel *DockPanel, cursor image.Point) {
 
 // HandlePointingInput starts a whole-group drag when the empty part of the tab
 // bar (right of the tabs) is pressed. Vertical edge bars cannot be group-dragged.
-func (g *DockGroup) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
+func (g *group) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
 	if g.vertical || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return guigui.HandleInputResult{}
 	}
@@ -86,7 +86,7 @@ func (g *DockGroup) HandlePointingInput(context *guigui.Context, widgetBounds *g
 	return guigui.HandleInputResult{}
 }
 
-func (g *DockGroup) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
+func (g *group) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	g.tabs.SetLen(len(g.panels))
 	for i, panel := range g.panels {
 		tab := g.tabs.At(i)
@@ -101,7 +101,7 @@ func (g *DockGroup) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 	return nil
 }
 
-func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
+func (g *group) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
 
@@ -177,7 +177,7 @@ func (g *DockGroup) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 	}
 }
 
-func (g *DockGroup) tabInsertionIndex(cursor image.Point) (int, bool) {
+func (g *group) tabInsertionIndex(cursor image.Point) (int, bool) {
 	if !cursor.In(g.tabBar) {
 		return 0, false
 	}
@@ -193,7 +193,7 @@ func (g *DockGroup) tabInsertionIndex(cursor image.Point) (int, bool) {
 	return len(g.tabBounds), true
 }
 
-func (g *DockGroup) tabInsertionRect(index int) image.Rectangle {
+func (g *group) tabInsertionRect(index int) image.Rectangle {
 	const markerWidth = 3
 	if g.vertical {
 		if index >= len(g.tabBounds) {
@@ -225,7 +225,7 @@ func (g *DockGroup) tabInsertionRect(index int) image.Rectangle {
 	}
 }
 
-func (g *DockGroup) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+func (g *group) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
 	rail := color.RGBA{0x23, 0x26, 0x2a, 0xff}
@@ -259,8 +259,8 @@ func (g *DockGroup) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBou
 type groupTab struct {
 	guigui.DefaultWidget
 
-	group  *DockGroup
-	panel  *DockPanel
+	group  *group
+	panel  *Panel
 	active bool
 
 	label basicwidget.Text
