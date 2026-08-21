@@ -883,6 +883,6 @@ func (d *DockingLayout) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	}
 	for _, div := range d.dividers {
 		b := div.bounds
-		vector.DrawFilledRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), clr, false)
+		vector.FillRect(dst, float32(b.Min.X), float32(b.Min.Y), float32(b.Dx()), float32(b.Dy()), clr, false)
 	}
 }
