@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// SPDX-FileCopyrightText: 2026 The Guigui Authors
-
 package main
 
 import (
@@ -504,9 +501,13 @@ func (d *DockingLayout) movePanel(panel *DockPanel, source *DockGroup, fromBar e
 			return
 		}
 		removePanelFromGroup(source, panel)
-		d.root = attachNode(d.root, targetNode, &DockNode{
-			group: &DockGroup{panels: []*DockPanel{panel}, selected: 0},
-		}, edge)
+		node := &DockNode{
+			group: &DockGroup{
+				panels:   []*DockPanel{panel},
+				selected: 0,
+			},
+		}
+		d.root = attachNode(d.root, targetNode, node, edge)
 		return
 	}
 
