@@ -72,9 +72,13 @@ func (o *dockOverlay) Draw(context *guigui.Context, widgetBounds *guigui.WidgetB
 	if r.Empty() {
 		return
 	}
-	// A fixed, semi-transparent accent; not yet theme-integrated.
-	highlight := color.RGBA{0x3b, 0x82, 0xf6, 0x66}
-	vector.DrawFilledRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), highlight, false)
+	accent := color.RGBA{0x2f, 0x80, 0xed, 0xff}
+	if o.dock.dropTabGroup != nil {
+		// Insertion targets should guide placement without obscuring the tab rail.
+		vector.StrokeRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), 1, accent, false)
+		return
+	}
+	vector.StrokeRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), 1, accent, false)
 }
 
 // DockingLayout arranges dockable panels in a nestable tree of groups (tabs)
