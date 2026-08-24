@@ -109,6 +109,10 @@ func (o *dockOverlay) Draw(context *guigui.Context, widgetBounds *guigui.WidgetB
 		return
 	}
 	accent := color.RGBA{0x2f, 0x80, 0xed, 0xff}
+	if o.dock.dropRoot {
+		vector.StrokeRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), 2, accent, false)
+		return
+	}
 	if o.dock.dropTabGroup != nil {
 		// Insertion targets should guide placement without obscuring the tab rail.
 		vector.StrokeRect(dst, float32(r.Min.X), float32(r.Min.Y), float32(r.Dx()), float32(r.Dy()), 1, accent, false)
@@ -155,6 +159,7 @@ type Layout struct {
 	dropRect     image.Rectangle
 	dropTabGroup *group
 	dropTabIndex int
+	dropRoot     bool
 	// dragFromBar is the source edge bar for a panel drag (none for tree).
 	dragFromBar edgeSide
 	// dropBar is the target edge bar for a drop (none for tree drops).
@@ -803,6 +808,7 @@ func (d *Layout) beginDrag(panel *Panel, group *group, cursor image.Point) {
 	d.dropRect = image.Rectangle{}
 	d.dropTabGroup = nil
 	d.dropTabIndex = 0
+	d.dropRoot = false
 }
 
 // beginDragFromBar starts moving a panel out of a vertical edge bar.
@@ -844,6 +850,23 @@ func (d *Layout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 	d.dropTabGroup = nil
 	d.dropTabIndex = 0
 	groupDrag := d.dragGroupNode != nil
+	rootBand := basicwidget.UnitSize(context)
+	if d.root != nil && cursor.In(d.rootBounds) && !d.cursorInRootChild(cursor) {
+		if cursor.Y >= d.rootBounds.Min.Y+rootBand && cursor.Y < d.rootBounds.Min.Y+2*rootBand {
+			d.dropNode = d.root
+			d.dropEdge = dropEdgeTop
+			d.dropRoot = true
+			d.dropRect = image.Rectangle{Min: image.Pt(d.rootBounds.Min.X, d.rootBounds.Min.Y+rootBand), Max: image.Pt(d.rootBounds.Max.X, d.rootBounds.Min.Y+2*rootBand)}
+			return
+		}
+		if cursor.Y >= d.rootBounds.Max.Y-2*rootBand && cursor.Y < d.rootBounds.Max.Y-rootBand {
+			d.dropNode = d.root
+			d.dropEdge = dropEdgeBottom
+			d.dropRoot = true
+			d.dropRect = image.Rectangle{Min: image.Pt(d.rootBounds.Min.X, d.rootBounds.Max.Y-2*rootBand), Max: image.Pt(d.rootBounds.Max.X, d.rootBounds.Max.Y-rootBand)}
+			return
+		}
+	}
 
 	// A tab strip is more specific than the root edge zone, which may overlap
 	// the first tab at the left or right edge of the layout.
@@ -917,6 +940,31 @@ func (d *Layout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 	}
 }
 
+func (d *Layout) cursorInRootChild(cursor image.Point) bool {
+	if d.root == nil || d.root.split == nil {
+		return false
+	}
+	for _, bounds := range d.groupBounds {
+		if !cursor.In(bounds.bounds) {
+			continue
+		}
+		if nodeIsDescendantOf(d.root.split.first, bounds.node) || nodeIsDescendantOf(d.root.split.second, bounds.node) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeIsDescendantOf(ancestor, target *Node) bool {
+	if ancestor == nil {
+		return false
+	}
+	if ancestor == target {
+		return true
+	}
+	return ancestor.split != nil && (nodeIsDescendantOf(ancestor.split.first, target) || nodeIsDescendantOf(ancestor.split.second, target))
+}
+
 // finishDrag applies the pending drop, if any, and clears the drag state.
 func (d *Layout) finishDrag() {
 	switch {
@@ -926,7 +974,11 @@ func (d *Layout) finishDrag() {
 		} else if d.dropBar != edgeSideNone {
 			d.moveGroupToBar(d.dragGroupNode, d.dropBar)
 		} else if d.dropNode != nil && d.dropEdge != dropEdgeNone {
-			d.moveGroup(d.dragGroupNode, d.dropNode, d.dropEdge)
+			if d.dropNode == d.root && d.dropEdge != dropEdgeCenter {
+				d.moveGroupToRoot(d.dragGroupNode, d.dropEdge)
+			} else {
+				d.moveGroup(d.dragGroupNode, d.dropNode, d.dropEdge)
+			}
 		}
 	case d.dragPanel != nil:
 		if d.dropTabGroup != nil {
@@ -934,7 +986,11 @@ func (d *Layout) finishDrag() {
 		} else if d.dropBar != edgeSideNone {
 			d.movePanelToBar(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropBar)
 		} else if d.dropNode != nil && d.dropEdge != dropEdgeNone {
-			d.movePanel(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropNode, d.dropEdge)
+			if d.dropNode == d.root && d.dropEdge != dropEdgeCenter {
+				d.movePanelToRoot(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropEdge)
+			} else {
+				d.movePanel(d.dragPanel, d.dragGroup, d.dragFromBar, d.dropNode, d.dropEdge)
+			}
 		}
 	}
 	d.dragPanel = nil
@@ -948,6 +1004,7 @@ func (d *Layout) finishDrag() {
 	d.dropRect = image.Rectangle{}
 	d.dropTabGroup = nil
 	d.dropTabIndex = 0
+	d.dropRoot = false
 	d.requestRedraw()
 }
 
@@ -986,6 +1043,22 @@ func (d *Layout) movePanel(panel *Panel, source *group, fromBar edgeSide, target
 		selected: 0,
 	}
 	d.root = attachNode(d.root, targetNode, &Node{group: newGroup}, edge)
+}
+
+func (d *Layout) movePanelToRoot(panel *Panel, source *group, fromBar edgeSide, edge dropEdge) {
+	root := d.root
+	d.removePanelFromSource(panel, source, fromBar)
+	newNode := &Node{group: &group{panels: []*Panel{panel}, selected: 0}}
+	d.root = attachNode(d.root, root, newNode, edge)
+}
+
+func (d *Layout) moveGroupToRoot(sourceNode *Node, edge dropEdge) {
+	root := d.root
+	if sourceNode == root {
+		return
+	}
+	d.root = removeNode(d.root, sourceNode)
+	d.root = attachNode(d.root, root, sourceNode, edge)
 }
 
 func (d *Layout) insertPanelAt(panel *Panel, source *group, fromBar edgeSide, target *group, index int) {
@@ -1373,14 +1446,14 @@ func (d *Layout) dropEdgeAt(context *guigui.Context, cursor image.Point, b image
 	edgeX := b.Dx() / 3
 	edgeY := b.Dy() / 3
 	switch {
-	case cursor.X < b.Min.X+edgeX:
-		return dropEdgeLeft
-	case cursor.X >= b.Max.X-edgeX:
-		return dropEdgeRight
 	case cursor.Y < b.Min.Y+edgeY:
 		return dropEdgeTop
 	case cursor.Y >= b.Max.Y-edgeY:
 		return dropEdgeBottom
+	case cursor.X < b.Min.X+edgeX:
+		return dropEdgeLeft
+	case cursor.X >= b.Max.X-edgeX:
+		return dropEdgeRight
 	default:
 		return dropEdgeCenter
 	}
