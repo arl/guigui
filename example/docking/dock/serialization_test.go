@@ -96,3 +96,22 @@ func TestRootApplyJSONIsAtomic(t *testing.T) {
 		t.Fatalf("invalid restore mutated layout:\n got %s\nwant %s", after, before)
 	}
 }
+
+func TestRootMarshalRejectsUnregisteredPanelWithoutPanicking(t *testing.T) {
+	registered := &Panel{Title: "Registered"}
+	root, err := NewRoot(Group("registered", registered))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root.layout.root.group.panels = append(root.layout.root.group.panels, &Panel{Title: "Unregistered"})
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("MarshalJSON panicked: %v", recovered)
+		}
+	}()
+	if _, err := json.Marshal(root); err == nil || !strings.Contains(err.Error(), "without a registered node") {
+		t.Fatalf("MarshalJSON error = %v, want unregistered panel error", err)
+	}
+}

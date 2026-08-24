@@ -78,20 +78,24 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 			case 0: // load
 				buf, err := os.ReadFile("dock.json")
 				if err != nil {
-					panic(err)
+					fmt.Fprintln(os.Stderr, "load dock.json:", err)
+					return
 				}
 				if err := r.dock.ApplyJSON(buf); err != nil {
-					panic(err)
+					fmt.Fprintln(os.Stderr, "apply dock.json:", err)
+					return
 				}
 				fmt.Println("loaded dock.json")
 
 			case 1: // save
 				buf, err := r.dock.MarshalJSON()
 				if err != nil {
-					panic(err)
+					fmt.Fprintln(os.Stderr, "save dock.json:", err)
+					return
 				}
 				if err := os.WriteFile("dock.json", buf, 0o744); err != nil {
-					panic(err)
+					fmt.Fprintln(os.Stderr, "save dock.json:", err)
+					return
 				}
 				fmt.Println("saved dock.json")
 			}
