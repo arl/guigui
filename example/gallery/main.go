@@ -36,6 +36,7 @@ type Root struct {
 	sliders           Sliders
 	progressBars      ProgressBars
 	lists             Lists
+	date              Date
 	selects           Selects
 	comboboxes        Comboboxes
 	tables            Tables
@@ -84,6 +85,8 @@ func (r *Root) contentWidget() guigui.Widget {
 		return &r.progressBars
 	case "lists":
 		return &r.lists
+	case "date":
+		return &r.date
 	case "selects":
 		return &r.selects
 	case "comboboxes":

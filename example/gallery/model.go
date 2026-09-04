@@ -30,6 +30,7 @@ type Model struct {
 	sliders           SlidersModel
 	progressBars      ProgressBarsModel
 	lists             ListsModel
+	date              DateModel
 	selects           SelectsModel
 	comboboxes        ComboboxesModel
 	tables            TablesModel
@@ -89,6 +90,10 @@ func (m *Model) ProgressBars() *ProgressBarsModel {
 
 func (m *Model) Lists() *ListsModel {
 	return &m.lists
+}
+
+func (m *Model) Date() *DateModel {
+	return &m.date
 }
 
 func (m *Model) Selects() *SelectsModel {
@@ -815,6 +820,32 @@ func (l *ListsModel) Enabled() bool {
 
 func (l *ListsModel) SetEnabled(enabled bool) {
 	l.disabled = !enabled
+}
+
+type DateModel struct {
+	// selectItems []basicwidget.SelectItem[int]
+
+	disabled bool
+}
+
+// func (s *DateModel) AppendSelectItems(items []basicwidget.SelectItem[int]) []basicwidget.SelectItem[int] {
+// 	if s.selectItems == nil {
+// 		for i := range 9 {
+// 			s.selectItems = append(s.selectItems, basicwidget.SelectItem[int]{
+// 				Text:  fmt.Sprintf("Item %d", i+1),
+// 				Value: i + 1,
+// 			})
+// 		}
+// 	}
+// 	return append(items, s.selectItems...)
+// }
+
+func (s *DateModel) Enabled() bool {
+	return !s.disabled
+}
+
+func (s *DateModel) SetEnabled(enabled bool) {
+	s.disabled = !enabled
 }
 
 type SelectsModel struct {

@@ -39,6 +39,7 @@ type Select[T comparable] struct {
 	indexAtOpen int
 
 	itemSelectedDispatchedFromPopupMenu bool
+	popupDetached                       bool
 
 	onDown                  func(context *guigui.Context)
 	onPopupMenuItemSelected func(context *guigui.Context, index int)
@@ -77,7 +78,7 @@ func (s *Select[T]) updatePopupMenuItems() {
 
 func (s *Select[T]) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	adder.AddWidget(&s.button)
-	if s.popupMenu.IsOpen() {
+	if !s.popupDetached && s.popupMenu.IsOpen() {
 		adder.AddWidget(&s.popupMenu)
 	}
 
@@ -129,8 +130,14 @@ func (s *Select[T]) Build(context *guigui.Context, adder *guigui.ChildAdder) err
 
 func (s *Select[T]) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	layouter.LayoutWidget(&s.button, widgetBounds.Bounds())
+	if s.popupDetached && !s.popupMenu.IsOpen() {
+		return
+	}
+	layouter.LayoutWidget(&s.popupMenu, s.popupLayoutBounds(context, widgetBounds.Bounds()))
+}
 
-	p := widgetBounds.Bounds().Min
+func (s *Select[T]) popupLayoutBounds(context *guigui.Context, selectBounds image.Rectangle) image.Rectangle {
+	p := selectBounds.Min
 	p.X -= listItemCheckmarkSize(context) + listItemTextAndImagePadding(context)
 	p.X = max(p.X, 0)
 	// TODO: The item content in a button and a select might have different heights. Handle this case properly.
@@ -138,10 +145,14 @@ func (s *Select[T]) Layout(context *guigui.Context, widgetBounds *guigui.WidgetB
 		p.Y -= y
 	}
 	p.Y = max(p.Y, 0)
-	layouter.LayoutWidget(&s.popupMenu, image.Rectangle{
+	return image.Rectangle{
 		Min: p,
 		Max: p.Add(s.popupMenu.Measure(context, guigui.Constraints{})),
-	})
+	}
+}
+
+func (s *Select[T]) setPopupDetached(detached bool) {
+	s.popupDetached = detached
 }
 
 func (s *Select[T]) SetItems(items []SelectItem[T]) {
