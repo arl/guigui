@@ -452,6 +452,27 @@ func (p *popup) HandlePointingInput(context *guigui.Context, widgetBounds *guigu
 	return guigui.AbortHandlingInputByWidget(p)
 }
 
+// snapClosed immediately marks the popup fully closed, including when it is out
+// of the tree so Tick cannot finish a hide animation. Nested menus inside another
+// popup need this when the parent is dismissed while they are still open.
+func (p *popup) snapClosed() {
+	if !p.IsOpen() && !p.toClose {
+		return
+	}
+	p.toOpen = false
+	p.toClose = false
+	p.showing = false
+	p.hiding = false
+	p.openingCount = 0
+	p.openAfterClose = false
+	p.closeReason = PopupCloseReasonNone
+	delete(openPopups, p)
+}
+
+func (p *Popup) snapClosed() {
+	p.popup.Widget().snapClosed()
+}
+
 func (p *popup) SetOpen(open bool) {
 	// A subordinate popup must not cover a non-subordinate popup that opened
 	// after its trigger began (see recordSubordinateTrigger).

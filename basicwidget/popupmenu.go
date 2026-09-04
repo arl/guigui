@@ -66,6 +66,14 @@ func (p *PopupMenu[T]) SetReservesCheckmarkSpace(reserves bool) {
 
 func (p *PopupMenu[T]) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	adder.AddWidget(&p.popup)
+	if p.IsOpen() {
+		// Keep the menu above ancestor popups that also call BringToFrontLayer
+		// during Build (for example a date picker calendar).
+		p.popup.BringToFrontLayer(context)
+		// The menu is a LayerWidget whose unclipped bounds may not be in the
+		// parent's dirty region; request a redraw so it paints over what it covers.
+		guigui.RequestRedraw(&p.popup)
+	}
 
 	list := p.list.Widget()
 	list.SetStyle(ListStyleMenu)
@@ -107,6 +115,11 @@ func (p *PopupMenu[T]) Layout(context *guigui.Context, widgetBounds *guigui.Widg
 	b := p.contentBounds(context, widgetBounds)
 	p.list.SetFixedSize(b.Size())
 	layouter.LayoutWidget(&p.popup, b)
+	if p.IsOpen() {
+		// Layout runs after every ancestor Build, so this stays above a parent
+		// popup that calls BringToFrontLayer during its own Build (e.g. a date picker).
+		p.popup.BringToFrontLayer(context)
+	}
 }
 
 func (p *PopupMenu[T]) Measure(context *guigui.Context, constraints guigui.Constraints) image.Point {
@@ -165,6 +178,10 @@ func (p *PopupMenu[T]) setMinWidth(minWidth int) {
 
 func (p *PopupMenu[T]) setCloseByClickingOutsideExcludedRect(rect image.Rectangle) {
 	p.popup.popup.Widget().setCloseByClickingOutsideExcludedRect(rect)
+}
+
+func (p *PopupMenu[T]) snapClosed() {
+	p.popup.snapClosed()
 }
 
 func (p *PopupMenu[T]) SetOpen(open bool) {
