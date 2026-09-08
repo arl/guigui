@@ -94,13 +94,17 @@ func (g *group) HandlePointingInput(context *guigui.Context, widgetBounds *guigu
 }
 
 func (g *group) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
-	g.tabs.SetLen(len(g.panels))
-	for i, panel := range g.panels {
-		tab := g.tabs.At(i)
-		tab.group = g
-		tab.panel = panel
-		tab.active = i == g.selected
-		adder.AddWidget(tab)
+	if g.hideTabBar() {
+		g.tabs.SetLen(0)
+	} else {
+		g.tabs.SetLen(len(g.panels))
+		for i, panel := range g.panels {
+			tab := g.tabs.At(i)
+			tab.group = g
+			tab.panel = panel
+			tab.active = i == g.selected
+			adder.AddWidget(tab)
+		}
 	}
 	if !g.collapsed && g.selected >= 0 && g.selected < len(g.panels) {
 		adder.AddWidget(g.panels[g.selected].Content)
@@ -108,9 +112,22 @@ func (g *group) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	return nil
 }
 
+// hideTabBar reports whether the tab bar should be skipped: a locked group
+// with a single panel has no tab worth dragging, switching, or dropping onto.
+func (g *group) hideTabBar() bool {
+	return g.locked && len(g.panels) <= 1
+}
+
 func (g *group) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
+
+	if g.hideTabBar() {
+		if g.selected >= 0 && g.selected < len(g.panels) {
+			layouter.LayoutWidget(g.panels[g.selected].Content, b)
+		}
+		return
+	}
 
 	if g.vertical {
 		var strip, content image.Rectangle
@@ -233,6 +250,9 @@ func (g *group) tabInsertionRect(index int) image.Rectangle {
 }
 
 func (g *group) Draw(context *guigui.Context, widgetBounds *guigui.WidgetBounds, dst *ebiten.Image) {
+	if g.hideTabBar() {
+		return
+	}
 	u := basicwidget.UnitSize(context)
 	b := widgetBounds.Bounds()
 	rail := color.RGBA{0x23, 0x26, 0x2a, 0xff}

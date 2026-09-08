@@ -1156,7 +1156,7 @@ func (d *Layout) moveGroupToBar(sourceNode *Node, side edgeSide) {
 
 // movePanelToBar moves a single panel onto a root edge, creating a bar if
 // needed or adding the panel to the existing bar's group.
-func (d *Layout) movePanelToBar(panel *Panel, source *group, fromBar edgeSide, side edgeSide) {
+func (d *Layout) movePanelToBar(panel *Panel, source *group, fromBar, side edgeSide) {
 	if fromBar == side {
 		// Dropped back onto the bar it came from; nothing to do.
 		return
