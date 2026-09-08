@@ -23,6 +23,10 @@ type group struct {
 	panels   []*Panel
 	selected int
 
+	// locked disables dragging a tab or the whole group out, and rejects a
+	// drop that would tab another node's panels into this group.
+	locked bool
+
 	// onDragStart is wired by Layout to begin moving a panel whose
 	// tab was pressed.
 	onDragStart func(panel *Panel, cursor image.Point)
@@ -55,13 +59,16 @@ type group struct {
 	tabBar      image.Rectangle
 }
 
-// pressTab selects panel and starts a drag of it.
+// pressTab selects panel and starts a drag of it, unless the group is locked.
 func (g *group) pressTab(panel *Panel, cursor image.Point) {
 	for i, p := range g.panels {
 		if p == panel {
 			g.selected = i
 			break
 		}
+	}
+	if g.locked {
+		return
 	}
 	if g.onDragStart != nil {
 		g.onDragStart(panel, cursor)
@@ -71,7 +78,7 @@ func (g *group) pressTab(panel *Panel, cursor image.Point) {
 // HandlePointingInput starts a whole-group drag when the empty part of the tab
 // bar (right of the tabs) is pressed. Vertical edge bars cannot be group-dragged.
 func (g *group) HandlePointingInput(context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
-	if g.vertical || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if g.vertical || g.locked || !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 		return guigui.HandleInputResult{}
 	}
 	cursor := image.Pt(ebiten.CursorPosition())

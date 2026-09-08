@@ -66,6 +66,22 @@ func Group(id string, panels ...*Panel) *Node {
 	return &Node{ID: id, group: &group{panels: append([]*Panel(nil), panels...)}, panels: panels}
 }
 
+// LockedGroup creates a named leaf node like [Group], but one whose panels
+// can never be dragged out, removed, or covered by another node's panels
+// tabbed in via a drag. Use it for content that must always stay visible,
+// such as a fixed viewport docked among otherwise rearrangeable panels.
+// Other nodes can still be docked to its Left, Right, Top, or Bottom.
+func LockedGroup(id string, panels ...*Panel) *Node {
+	node := Group(id, panels...)
+	node.group.locked = true
+	return node
+}
+
+// Locked reports whether node was created with [LockedGroup].
+func (n *Node) Locked() bool {
+	return n != nil && n.group != nil && n.group.locked
+}
+
 // Split creates a split node with the provided child nodes and ratio.
 func Split(direction Direction, ratio float64, first, second *Node) *Node {
 	return &Node{split: &split{direction: direction, ratio: ratio, first: first, second: second}}
@@ -465,6 +481,7 @@ func (r *Root) groupFromSnapshot(snapshot *snapshotTabGroup, seen map[string]str
 		return nil, fmt.Errorf("dock: tab group has no nodes")
 	}
 	panels := make([]*Panel, 0)
+	var locked bool
 	for _, id := range snapshot.Nodes {
 		if _, ok := seen[id]; ok {
 			return nil, fmt.Errorf("dock: node ID %q appears more than once", id)
@@ -473,13 +490,17 @@ func (r *Root) groupFromSnapshot(snapshot *snapshotTabGroup, seen map[string]str
 		if node == nil {
 			return nil, fmt.Errorf("dock: snapshot references unknown node ID %q", id)
 		}
+		if node.Locked() && len(snapshot.Nodes) > 1 {
+			return nil, fmt.Errorf("dock: locked node %q cannot be tabbed with other nodes", id)
+		}
+		locked = locked || node.Locked()
 		seen[id] = struct{}{}
 		panels = append(panels, node.panels...)
 	}
 	if snapshot.Selected < 0 || snapshot.Selected >= len(panels) {
 		return nil, fmt.Errorf("dock: invalid selected tab index %d", snapshot.Selected)
 	}
-	return &group{panels: panels, selected: snapshot.Selected}, nil
+	return &group{panels: panels, selected: snapshot.Selected, locked: locked}, nil
 }
 
 func leafNodes(node *Node) []*Node {
@@ -533,6 +554,9 @@ func (d *Layout) Add(node, target *Node, position Position) bool {
 	}
 	switch position {
 	case Center:
+		if targetGroup.locked {
+			return false
+		}
 		targetGroup.panels = append(targetGroup.panels, node.panels...)
 		targetGroup.selected = len(targetGroup.panels) - 1
 	case Left:
@@ -570,7 +594,7 @@ func (d *Layout) Add(node, target *Node, position Position) bool {
 // Remove removes node's panels from the layout. It returns false when node is
 // absent. The node remains reusable with a later [Layout.Add] call.
 func (d *Layout) Remove(node *Node) bool {
-	if node == nil || len(node.panels) == 0 || !d.Contains(node) {
+	if node == nil || len(node.panels) == 0 || !d.Contains(node) || node.Locked() {
 		return false
 	}
 	d.root = removePanels(d.root, node.panels)
@@ -872,7 +896,7 @@ func (d *Layout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 	// the first tab at the left or right edge of the layout.
 	for i := range d.groupBounds {
 		gb := &d.groupBounds[i]
-		if !cursor.In(gb.bounds) {
+		if !cursor.In(gb.bounds) || gb.node.group.locked {
 			continue
 		}
 		if tabIndex, ok := gb.node.group.tabInsertionIndex(cursor); ok && !(groupDrag && gb.node == d.dragGroupNode) {
@@ -918,6 +942,11 @@ func (d *Layout) updateDropTarget(context *guigui.Context, cursor image.Point) {
 		}
 		edge := d.dropEdgeAt(context, cursor, gb.bounds)
 		if edge == dropEdgeNone {
+			continue
+		}
+		if edge == dropEdgeCenter && gb.node.group.locked {
+			// A locked group's tabs are never covered by a drop; only edge
+			// splits beside it are allowed.
 			continue
 		}
 		if groupDrag {
