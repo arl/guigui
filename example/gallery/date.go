@@ -8,6 +8,7 @@ import (
 
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/guigui-gui/guigui/example/datepicker/datepicker"
 )
 
 type Date struct {
@@ -22,15 +23,15 @@ type Date struct {
 	form  basicwidget.Form
 
 	dockedLabel  basicwidget.Text
-	dockedPicker basicwidget.DockedDatePicker
+	dockedPicker datepicker.DockedDatePicker
 	dockedValue  basicwidget.Text
 
 	modalLabel  basicwidget.Text
-	modalPicker basicwidget.ModalDatePicker
+	modalPicker datepicker.ModalDatePicker
 	modalValue  basicwidget.Text
 
 	inputLabel  basicwidget.Text
-	inputPicker basicwidget.ModalDateInput
+	inputPicker datepicker.ModalDateInput
 	inputValue  basicwidget.Text
 
 	layoutItems []guigui.LinearLayoutItem
@@ -57,21 +58,21 @@ func (d *Date) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 
 	d.dockedLabel.SetValue("Docked")
 	d.dockedPicker.SetPlaceholder("DD/MM/YYYY")
-	d.dockedPicker.OnValueChanged(func(context *guigui.Context, date basicwidget.Date) {
+	d.dockedPicker.OnValueChanged(func(context *guigui.Context, date datepicker.Date) {
 		d.dockedValue.SetValue(formatSelected(date))
 	})
 	d.dockedValue.SetValue(formatSelected(d.dockedPicker.Value()))
 
 	d.modalLabel.SetValue("Modal")
 	d.modalPicker.SetTitle("Select date")
-	d.modalPicker.OnValueChanged(func(context *guigui.Context, date basicwidget.Date) {
+	d.modalPicker.OnValueChanged(func(context *guigui.Context, date datepicker.Date) {
 		d.modalValue.SetValue(formatSelected(date))
 	})
 	d.modalValue.SetValue(formatSelected(d.modalPicker.Value()))
 
 	d.inputLabel.SetValue("Modal input")
 	d.inputPicker.SetTitle("Enter date")
-	d.inputPicker.OnValueChanged(func(context *guigui.Context, date basicwidget.Date) {
+	d.inputPicker.OnValueChanged(func(context *guigui.Context, date datepicker.Date) {
 		d.inputValue.SetValue(formatSelected(date))
 	})
 	d.inputValue.SetValue(formatSelected(d.inputPicker.Value()))
@@ -111,7 +112,8 @@ func (d *Date) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 
 	u := basicwidget.UnitSize(context)
 	d.layoutItems = slices.Delete(d.layoutItems, 0, len(d.layoutItems))
-	d.layoutItems = append(d.layoutItems,
+	d.layoutItems = append(
+		d.layoutItems,
 		guigui.LinearLayoutItem{Widget: &d.introTitle},
 		guigui.LinearLayoutItem{Widget: &d.introBody},
 		guigui.LinearLayoutItem{
@@ -132,7 +134,7 @@ func (d *Date) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 	}).LayoutWidgets(context, widgetBounds.Bounds(), layouter)
 }
 
-func formatSelected(d basicwidget.Date) string {
+func formatSelected(d datepicker.Date) string {
 	if d.IsZero() {
 		return "No date selected"
 	}

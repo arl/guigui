@@ -12,6 +12,7 @@ import (
 	"github.com/guigui-gui/guigui"
 	"github.com/guigui-gui/guigui/basicwidget"
 	_ "github.com/guigui-gui/guigui/basicwidget/cjkfont"
+	"github.com/guigui-gui/guigui/example/datepicker/datepicker"
 )
 
 type Root struct {
@@ -26,21 +27,21 @@ type Root struct {
 	form  basicwidget.Form
 
 	dockedLabel  basicwidget.Text
-	dockedPicker basicwidget.DockedDatePicker
+	dockedPicker datepicker.DockedDatePicker
 	dockedValue  basicwidget.Text
 
 	modalLabel  basicwidget.Text
-	modalPicker basicwidget.ModalDatePicker
+	modalPicker datepicker.ModalDatePicker
 	modalValue  basicwidget.Text
 
 	inputLabel  basicwidget.Text
-	inputPicker basicwidget.ModalDateInput
+	inputPicker datepicker.ModalDateInput
 	inputValue  basicwidget.Text
 
 	layoutItems []guigui.LinearLayoutItem
 }
 
-func formatSelected(d basicwidget.Date) string {
+func formatSelected(d datepicker.Date) string {
 	if d.IsZero() {
 		return "No date selected"
 	}
@@ -68,21 +69,21 @@ func (r *Root) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 
 	r.dockedLabel.SetValue("Docked")
 	r.dockedPicker.SetPlaceholder("DD/MM/YYYY")
-	r.dockedPicker.OnValueChanged(func(context *guigui.Context, date basicwidget.Date) {
+	r.dockedPicker.OnValueChanged(func(context *guigui.Context, date datepicker.Date) {
 		r.dockedValue.SetValue(formatSelected(date))
 	})
 	r.dockedValue.SetValue(formatSelected(r.dockedPicker.Value()))
 
 	r.modalLabel.SetValue("Modal")
 	r.modalPicker.SetTitle("Select date")
-	r.modalPicker.OnValueChanged(func(context *guigui.Context, date basicwidget.Date) {
+	r.modalPicker.OnValueChanged(func(context *guigui.Context, date datepicker.Date) {
 		r.modalValue.SetValue(formatSelected(date))
 	})
 	r.modalValue.SetValue(formatSelected(r.modalPicker.Value()))
 
 	r.inputLabel.SetValue("Modal input")
 	r.inputPicker.SetTitle("Enter date")
-	r.inputPicker.OnValueChanged(func(context *guigui.Context, date basicwidget.Date) {
+	r.inputPicker.OnValueChanged(func(context *guigui.Context, date datepicker.Date) {
 		r.inputValue.SetValue(formatSelected(date))
 	})
 	r.inputValue.SetValue(formatSelected(r.inputPicker.Value()))
@@ -122,7 +123,8 @@ func (r *Root) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds
 
 	u := basicwidget.UnitSize(context)
 	r.layoutItems = slices.Delete(r.layoutItems, 0, len(r.layoutItems))
-	r.layoutItems = append(r.layoutItems,
+	r.layoutItems = append(
+		r.layoutItems,
 		guigui.LinearLayoutItem{Widget: &r.introTitle},
 		guigui.LinearLayoutItem{Widget: &r.introBody},
 		guigui.LinearLayoutItem{

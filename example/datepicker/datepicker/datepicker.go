@@ -1,7 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
-// SPDX-FileCopyrightText: 2026 The Guigui Authors
-
-package basicwidget
+package datepicker
 
 import (
 	"image"
@@ -13,7 +10,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/guigui-gui/guigui"
-	"github.com/guigui-gui/guigui/basicwidget/internal/draw"
+	"github.com/guigui-gui/guigui/basicwidget"
+	"github.com/guigui-gui/guigui/basicwidget/basicwidgetdraw"
 )
 
 var (
@@ -44,11 +42,11 @@ func datePickerDefaultMode(kind datePickerKind) datePickerMode {
 }
 
 func datePickerPanelWidth(context *guigui.Context) int {
-	return 14 * UnitSize(context)
+	return 14 * basicwidget.UnitSize(context)
 }
 
 func datePickerDaySize(context *guigui.Context) int {
-	u := UnitSize(context)
+	u := basicwidget.UnitSize(context)
 	inner := datePickerPanelWidth(context) - u
 	return inner / 7
 }
@@ -56,7 +54,7 @@ func datePickerDaySize(context *guigui.Context) int {
 type datePickerDay struct {
 	guigui.DefaultWidget
 
-	label Text
+	label basicwidget.Text
 
 	date     Date
 	inMonth  bool
@@ -84,24 +82,24 @@ func (d *datePickerDay) Build(context *guigui.Context, adder *guigui.ChildAdder)
 	adder.AddWidget(&d.label)
 
 	d.label.SetValue(strconv.Itoa(d.date.Day))
-	d.label.SetHorizontalAlign(HorizontalAlignCenter)
-	d.label.SetVerticalAlign(VerticalAlignMiddle)
+	d.label.SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+	d.label.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 	context.SetPassthrough(&d.label, true)
 	context.SetEnabled(d, d.enabled)
 
 	cm := context.ColorMode()
-	var style TextStyle
+	var style basicwidget.TextStyle
 	switch {
 	case !d.enabled:
-		style.SetColor(draw.TextColor(cm, false))
+		style.SetColor(basicwidgetdraw.TextColor(cm, false))
 	case d.selected:
-		style.SetColor(draw.TextOnAccentColor(cm))
+		style.SetColor(textOnAccentColor(cm))
 	case d.today:
-		style.SetColor(draw.AccentColor(cm))
+		style.SetColor(accentColor(cm))
 	case !d.inMonth:
-		style.SetColor(draw.TextColor(cm, false))
+		style.SetColor(basicwidgetdraw.TextColor(cm, false))
 	default:
-		style.SetColor(draw.TextColor(cm, true))
+		style.SetColor(basicwidgetdraw.TextColor(cm, true))
 	}
 	d.label.SetBaseStyle(&style)
 	return nil
@@ -171,34 +169,34 @@ func (d *datePickerDay) Draw(context *guigui.Context, widgetBounds *guigui.Widge
 	hovered := widgetBounds.IsHitAtCursor()
 	switch {
 	case d.selected:
-		draw.DrawRoundedRect(context, dst, sq, draw.AccentColor(cm), radius)
+		basicwidgetdraw.DrawRoundedRect(context, dst, sq, accentColor(cm), radius)
 	case d.enabled && (hovered || d.pressed):
-		draw.DrawRoundedRect(context, dst, sq, draw.ItemHoveredBackgroundColor(cm), radius)
+		basicwidgetdraw.DrawRoundedRect(context, dst, sq, itemHoveredBackgroundColor(cm), radius)
 	}
 	if d.today && !d.selected {
-		clr1, clr2 := draw.BorderAccentColors(cm, draw.RoundedRectBorderTypeRegular)
+		clr1, clr2 := basicwidgetdraw.BorderAccentColors(cm, basicwidgetdraw.RoundedRectBorderTypeRegular)
 		width := float32(1 * context.Scale())
-		draw.DrawRoundedRectBorder(context, dst, sq, clr1, clr2, radius, width, draw.RoundedRectBorderTypeRegular)
+		basicwidgetdraw.DrawRoundedRectBorder(context, dst, sq, clr1, clr2, radius, width, basicwidgetdraw.RoundedRectBorderTypeRegular)
 	}
 }
 
 type datePickerContent struct {
 	guigui.DefaultWidget
 
-	supportingText Text
-	headlineText   Text
-	toggleButton   Button
-	headerDivider  Divider
-	monthSelect    Select[time.Month]
-	yearSelect     Select[int]
-	prevButton     Button
-	nextButton     Button
-	weekdays       [7]Text
+	supportingText basicwidget.Text
+	headlineText   basicwidget.Text
+	toggleButton   basicwidget.Button
+	headerDivider  basicwidget.Divider
+	monthSelect    basicwidget.Select[time.Month]
+	yearSelect     basicwidget.Select[int]
+	prevButton     basicwidget.Button
+	nextButton     basicwidget.Button
+	weekdays       [7]basicwidget.Text
 	days           [42]datePickerDay
-	input          TextInput
-	footerDivider  Divider
-	cancelButton   Button
-	okButton       Button
+	input          basicwidget.TextInput
+	footerDivider  basicwidget.Divider
+	cancelButton   basicwidget.Button
+	okButton       basicwidget.Button
 
 	kind         datePickerKind
 	mode         datePickerMode
@@ -210,8 +208,8 @@ type datePickerContent struct {
 	maxDate      Date
 	title        string
 
-	monthItems []SelectItem[time.Month]
-	yearItems  []SelectItem[int]
+	monthItems []basicwidget.SelectItem[time.Month]
+	yearItems  []basicwidget.SelectItem[int]
 
 	onDayActivated      [42]func(context *guigui.Context)
 	onMonthSelected     func(context *guigui.Context, index int)
@@ -269,31 +267,7 @@ func (c *datePickerContent) setOnCancelled(f func(context *guigui.Context)) {
 	c.onCancelled = f
 }
 
-func (c *datePickerContent) closeDropdowns() {
-	c.monthSelect.popupMenu.snapClosed()
-	c.yearSelect.popupMenu.snapClosed()
-}
-
-func (c *datePickerContent) addDetachedMenus(adder *guigui.ChildAdder) {
-	if c.monthSelect.IsPopupOpen() {
-		adder.AddWidget(&c.monthSelect.popupMenu)
-	}
-	if c.yearSelect.IsPopupOpen() {
-		adder.AddWidget(&c.yearSelect.popupMenu)
-	}
-}
-
-func (c *datePickerContent) layoutDetachedMenus(layouter *guigui.ChildLayouter) {
-	if c.monthSelect.IsPopupOpen() {
-		layouter.LayoutWidget(&c.monthSelect.popupMenu, image.Rectangle{})
-	}
-	if c.yearSelect.IsPopupOpen() {
-		layouter.LayoutWidget(&c.yearSelect.popupMenu, image.Rectangle{})
-	}
-}
-
 func (c *datePickerContent) beginSession(value Date) {
-	c.closeDropdowns()
 	c.mode = datePickerDefaultMode(c.kind)
 	if value.IsZero() {
 		c.draft = Today()
@@ -393,16 +367,16 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 		title = "Select date"
 	}
 	c.supportingText.SetValue(title)
-	var supportingStyle TextStyle
-	supportingStyle.SetColor(draw.TextColor(context.ColorMode(), false))
+	var supportingStyle basicwidget.TextStyle
+	supportingStyle.SetColor(basicwidgetdraw.TextColor(context.ColorMode(), false))
 	c.supportingText.SetBaseStyle(&supportingStyle)
 
 	c.headlineText.SetValue(formatDateHeadline(c.draft))
-	var headlineStyle TextStyle
+	var headlineStyle basicwidget.TextStyle
 	headlineStyle.SetBold(true)
 	c.headlineText.SetBaseStyle(&headlineStyle)
 	c.headlineText.SetScale(1.75)
-	c.headlineText.SetVerticalAlign(VerticalAlignMiddle)
+	c.headlineText.SetVerticalAlign(basicwidget.VerticalAlignMiddle)
 
 	if c.showsToggle() {
 		iconName := "edit"
@@ -417,7 +391,6 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 		if c.onToggle == nil {
 			c.onToggle = func(context *guigui.Context) {
 				if c.mode == datePickerModeCalendar {
-					c.closeDropdowns()
 					c.mode = datePickerModeInput
 				} else {
 					c.mode = datePickerModeCalendar
@@ -429,13 +402,11 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 
 	c.monthItems = adjustSliceSize(c.monthItems, 12)
 	for i := time.January; i <= time.December; i++ {
-		c.monthItems[i-1] = SelectItem[time.Month]{
+		c.monthItems[i-1] = basicwidget.SelectItem[time.Month]{
 			Text:  i.String(),
 			Value: i,
 		}
 	}
-	c.monthSelect.setPopupDetached(true)
-	c.yearSelect.setPopupDetached(true)
 	c.monthSelect.SetItems(c.monthItems)
 	if c.onMonthSelected == nil {
 		c.onMonthSelected = func(context *guigui.Context, index int) {
@@ -453,7 +424,7 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 	c.yearItems = adjustSliceSize(c.yearItems, yearCount)
 	for i := range yearCount {
 		y := datePickerMinYear + i
-		c.yearItems[i] = SelectItem[int]{
+		c.yearItems[i] = basicwidget.SelectItem[int]{
 			Text:  datePickerYearString(y),
 			Value: y,
 		}
@@ -493,8 +464,6 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 	}
 	c.prevButton.OnDown(c.onPrev)
 	c.nextButton.OnDown(c.onNext)
-	c.prevButton.setOnRepeat(c.onPrev)
-	c.nextButton.setOnRepeat(c.onNext)
 	context.SetEnabled(&c.prevButton, c.canShiftViewedMonth(-1) && !c.monthSelect.IsPopupOpen() && !c.yearSelect.IsPopupOpen())
 	context.SetEnabled(&c.nextButton, c.canShiftViewedMonth(1) && !c.monthSelect.IsPopupOpen() && !c.yearSelect.IsPopupOpen())
 	context.SetEnabled(&c.monthSelect, !c.yearSelect.IsPopupOpen())
@@ -507,10 +476,10 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 	for i := range c.weekdays {
 		day := time.Weekday((int(c.firstWeekday) + i) % 7)
 		c.weekdays[i].SetValue(weekdayLetter(day))
-		c.weekdays[i].SetHorizontalAlign(HorizontalAlignCenter)
-		c.weekdays[i].SetVerticalAlign(VerticalAlignMiddle)
-		var style TextStyle
-		style.SetColor(draw.TextColor(context.ColorMode(), false))
+		c.weekdays[i].SetHorizontalAlign(basicwidget.HorizontalAlignCenter)
+		c.weekdays[i].SetVerticalAlign(basicwidget.VerticalAlignMiddle)
+		var style basicwidget.TextStyle
+		style.SetColor(basicwidgetdraw.TextColor(context.ColorMode(), false))
 		c.weekdays[i].SetBaseStyle(&style)
 	}
 	for i := range c.days {
@@ -552,7 +521,7 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 
 	c.cancelButton.SetText("Cancel")
 	c.okButton.SetText("OK")
-	c.okButton.SetType(ButtonTypePrimary)
+	c.okButton.SetType(basicwidget.ButtonTypePrimary)
 	if c.onCancel == nil {
 		c.onCancel = func(context *guigui.Context) {
 			if c.onCancelled != nil {
@@ -578,7 +547,7 @@ func (c *datePickerContent) Build(context *guigui.Context, adder *guigui.ChildAd
 }
 
 func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout {
-	u := UnitSize(context)
+	u := basicwidget.UnitSize(context)
 	dayH := datePickerDaySize(context)
 	showCalendar := c.mode == datePickerModeCalendar
 
@@ -586,11 +555,13 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 
 	if c.showsHeadline() {
 		c.headlineItems = slices.Delete(c.headlineItems, 0, len(c.headlineItems))
-		c.headlineItems = append(c.headlineItems,
+		c.headlineItems = append(
+			c.headlineItems,
 			guigui.LinearLayoutItem{Widget: &c.headlineText, Size: guigui.FlexibleSize(1)},
 		)
 		if c.showsToggle() {
-			c.headlineItems = append(c.headlineItems,
+			c.headlineItems = append(
+				c.headlineItems,
 				guigui.LinearLayoutItem{Widget: &c.toggleButton, Size: guigui.FixedSize(u)},
 			)
 		}
@@ -599,7 +570,8 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 			Items:     c.headlineItems,
 			Gap:       u / 4,
 		}
-		c.layoutItems = append(c.layoutItems,
+		c.layoutItems = append(
+			c.layoutItems,
 			guigui.LinearLayoutItem{Widget: &c.supportingText},
 			guigui.LinearLayoutItem{
 				Size:   guigui.FixedSize(max(u+u/2, c.headlineText.Measure(context, guigui.Constraints{}).Y)),
@@ -611,7 +583,8 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 
 	if showCalendar {
 		c.navItems = slices.Delete(c.navItems, 0, len(c.navItems))
-		c.navItems = append(c.navItems,
+		c.navItems = append(
+			c.navItems,
 			guigui.LinearLayoutItem{Widget: &c.prevButton, Size: guigui.FixedSize(u)},
 			guigui.LinearLayoutItem{Widget: &c.nextButton, Size: guigui.FixedSize(u)},
 		)
@@ -621,7 +594,8 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 			Gap:       u / 4,
 		}
 		c.headerItems = slices.Delete(c.headerItems, 0, len(c.headerItems))
-		c.headerItems = append(c.headerItems,
+		c.headerItems = append(
+			c.headerItems,
 			guigui.LinearLayoutItem{Widget: &c.monthSelect},
 			guigui.LinearLayoutItem{Widget: &c.yearSelect},
 			guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
@@ -645,13 +619,14 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 			Items:     c.weekdayItems,
 		}
 
-		c.layoutItems = append(c.layoutItems,
+		c.layoutItems = append(
+			c.layoutItems,
 			guigui.LinearLayoutItem{
 				Size:   guigui.FixedSize(u),
 				Layout: &c.headerLayout,
 			},
 			guigui.LinearLayoutItem{
-				Size:   guigui.FixedSize(LineHeight(context)),
+				Size:   guigui.FixedSize(basicwidget.LineHeight(context)),
 				Layout: &c.weekdayLayout,
 			},
 		)
@@ -673,13 +648,15 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 			})
 		}
 	} else {
-		c.layoutItems = append(c.layoutItems,
+		c.layoutItems = append(
+			c.layoutItems,
 			guigui.LinearLayoutItem{Widget: &c.input},
 		)
 	}
 
 	c.actionItems = slices.Delete(c.actionItems, 0, len(c.actionItems))
-	c.actionItems = append(c.actionItems,
+	c.actionItems = append(
+		c.actionItems,
 		guigui.LinearLayoutItem{Size: guigui.FlexibleSize(1)},
 		guigui.LinearLayoutItem{Widget: &c.cancelButton},
 		guigui.LinearLayoutItem{Widget: &c.okButton},
@@ -689,7 +666,8 @@ func (c *datePickerContent) layout(context *guigui.Context) guigui.LinearLayout 
 		Items:     c.actionItems,
 		Gap:       u / 4,
 	}
-	c.layoutItems = append(c.layoutItems,
+	c.layoutItems = append(
+		c.layoutItems,
 		guigui.LinearLayoutItem{Widget: &c.footerDivider},
 		guigui.LinearLayoutItem{
 			Size:   guigui.FixedSize(u),
@@ -721,8 +699,8 @@ func (c *datePickerContent) Measure(context *guigui.Context, constraints guigui.
 type DockedDatePicker struct {
 	guigui.DefaultWidget
 
-	textInput TextInput
-	popup     Popup
+	textInput basicwidget.TextInput
+	popup     basicwidget.Popup
 	content   datePickerContent
 
 	value           Date
@@ -736,7 +714,7 @@ type DockedDatePicker struct {
 	onTextChanged func(context *guigui.Context, text string, committed bool)
 	onConfirmed   func(context *guigui.Context, date Date)
 	onCancelled   func(context *guigui.Context)
-	onClosed      func(context *guigui.Context, reason PopupCloseReason)
+	onClosed      func(context *guigui.Context, reason basicwidget.PopupCloseReason)
 }
 
 // Value returns the committed date. The zero value means no date is selected.
@@ -787,7 +765,6 @@ func (d *DockedDatePicker) commit(context *guigui.Context, date Date) {
 func (d *DockedDatePicker) Build(context *guigui.Context, adder *guigui.ChildAdder) error {
 	adder.AddWidget(&d.textInput)
 	adder.AddWidget(&d.popup)
-	d.content.addDetachedMenus(adder)
 
 	context.SetButtonInputReceptive(d, d.popup.IsOpen())
 	context.DelegateFocus(d, &d.textInput)
@@ -857,11 +834,9 @@ func (d *DockedDatePicker) Build(context *guigui.Context, adder *guigui.ChildAdd
 	d.popup.SetAnimated(true)
 	if d.popup.IsOpen() {
 		d.popup.BringToFrontLayer(context)
-	} else {
-		d.content.closeDropdowns()
 	}
 	if d.onClosed == nil {
-		d.onClosed = func(context *guigui.Context, reason PopupCloseReason) {
+		d.onClosed = func(context *guigui.Context, reason basicwidget.PopupCloseReason) {
 			d.textInput.SetValue(formatDate(d.value))
 			d.textInput.SetError(false)
 			d.textInput.SetSupportText("")
@@ -875,7 +850,6 @@ func (d *DockedDatePicker) Build(context *guigui.Context, adder *guigui.ChildAdd
 func (d *DockedDatePicker) Layout(context *guigui.Context, widgetBounds *guigui.WidgetBounds, layouter *guigui.ChildLayouter) {
 	bounds := widgetBounds.Bounds()
 	layouter.LayoutWidget(&d.textInput, bounds)
-	d.popup.popup.Widget().setCloseByClickingOutsideExcludedRect(bounds)
 
 	popupSize := d.content.Measure(context, guigui.Constraints{})
 	popupSize.X = max(popupSize.X, bounds.Dx())
@@ -891,7 +865,6 @@ func (d *DockedDatePicker) Layout(context *guigui.Context, widgetBounds *guigui.
 		Min: pos,
 		Max: pos.Add(popupSize),
 	})
-	d.content.layoutDetachedMenus(layouter)
 }
 
 func (d *DockedDatePicker) openPopup(context *guigui.Context) {
@@ -937,8 +910,8 @@ func (d *DockedDatePicker) Measure(context *guigui.Context, constraints guigui.C
 }
 
 type modalDatePicker struct {
-	button  Button
-	popup   Popup
+	button  basicwidget.Button
+	popup   basicwidget.Popup
 	content datePickerContent
 
 	kind         datePickerKind
@@ -968,7 +941,6 @@ func (m *modalDatePicker) build(self guigui.Widget, kind datePickerKind, context
 	m.kind = kind
 	adder.AddWidget(&m.button)
 	adder.AddWidget(&m.popup)
-	m.content.addDetachedMenus(adder)
 
 	context.SetButtonInputReceptive(self, m.popup.IsOpen())
 
@@ -1024,8 +996,6 @@ func (m *modalDatePicker) build(self guigui.Widget, kind datePickerKind, context
 	m.popup.SetAnimated(true)
 	if m.popup.IsOpen() {
 		m.popup.BringToFrontLayer(context)
-	} else {
-		m.content.closeDropdowns()
 	}
 
 	return nil
@@ -1045,7 +1015,6 @@ func (m *modalDatePicker) layout(context *guigui.Context, widgetBounds *guigui.W
 		Min: pos,
 		Max: pos.Add(popupSize),
 	})
-	m.content.layoutDetachedMenus(layouter)
 }
 
 func (m *modalDatePicker) handleButtonInput(self guigui.Widget, context *guigui.Context, widgetBounds *guigui.WidgetBounds) guigui.HandleInputResult {
